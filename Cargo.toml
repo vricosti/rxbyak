@@ -17,3 +17,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_SystemInformation",
     "Win32_Foundation",
 ] }
+
+[target.'cfg(windows)'.dev-dependencies]
+cc = "1"
