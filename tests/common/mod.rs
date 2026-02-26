@@ -155,40 +155,20 @@ pub fn nasm_listing(nasm_path: &str, code: &str, bits: u32) -> Vec<(String, Vec<
 }
 
 /// Parse a NASM listing file into (source_line, bytes) pairs.
+/// Handles continuation lines where NASM splits long instructions across multiple
+/// listing lines (e.g. EVEX instructions >9 bytes).
+///
 /// NASM listing format:
-///   line_num  offset  hex_bytes  source
-/// e.g.:
-///   2 00000000 89C8            mov eax, ecx
+///   line_num  offset  hex_bytes[-]  source
+/// Continuation line (same line number, no source):
+///   line_num  offset  hex_bytes
 fn parse_listing(listing: &str) -> Vec<(String, Vec<u8>)> {
-    let mut results = Vec::new();
+    let mut results: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut prev_line_num: Option<&str> = None;
+
     for line in listing.lines() {
-        // Skip empty lines and the `bits` directive line
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            continue;
-        }
-        // NASM listing: "     2 00000000 89C8                    mov eax, ecx"
-        // Format: line_number offset hex_data source
-        // We need at least line_number, offset, and hex data
-        let parts: Vec<&str> = trimmed.splitn(4, char::is_whitespace).collect();
-        if parts.len() < 3 {
-            continue;
-        }
-        // Check if the second field looks like a hex offset (8 hex chars)
-        let offset_str = parts.iter().find(|p| !p.is_empty()).and_then(|_| {
-            let non_empty: Vec<&str> = trimmed.split_whitespace().collect();
-            if non_empty.len() >= 3 {
-                Some(non_empty[1])
-            } else {
-                None
-            }
-        });
-        let offset_str = match offset_str {
-            Some(s) => s,
-            None => continue,
-        };
-        // Offset should be 8 hex digits
-        if offset_str.len() != 8 || !offset_str.chars().all(|c| c.is_ascii_hexdigit()) {
             continue;
         }
 
@@ -197,13 +177,18 @@ fn parse_listing(listing: &str) -> Vec<(String, Vec<u8>)> {
             continue;
         }
 
-        // The hex bytes are in the third field (and possibly continuation)
-        let hex_str = non_empty[2];
-        // Check it's actually hex data (not source code)
-        if !hex_str.chars().all(|c| c.is_ascii_hexdigit()) {
+        let line_num = non_empty[0];
+        let offset_str = non_empty[1];
+
+        // Offset should be 8 hex digits
+        if offset_str.len() != 8 || !offset_str.chars().all(|c| c.is_ascii_hexdigit()) {
             continue;
         }
-        if hex_str.is_empty() {
+
+        // The hex bytes field — may end with '-' indicating continuation
+        let hex_field = non_empty[2];
+        let hex_str = hex_field.trim_end_matches('-');
+        if hex_str.is_empty() || !hex_str.chars().all(|c| c.is_ascii_hexdigit()) {
             continue;
         }
 
@@ -216,14 +201,25 @@ fn parse_listing(listing: &str) -> Vec<(String, Vec<u8>)> {
             String::new()
         };
 
-        // Skip the "bits 64" directive (line 1 typically)
+        // Skip the "bits 64/32" directive
         if source.starts_with("bits ") {
+            prev_line_num = Some(line_num);
             continue;
         }
 
-        if !bytes.is_empty() {
+        // Check if this is a continuation line (same line number, no source)
+        let is_continuation = source.is_empty()
+            && prev_line_num == Some(line_num)
+            && !results.is_empty();
+
+        if is_continuation {
+            // Append bytes to the previous entry
+            results.last_mut().unwrap().1.extend_from_slice(&bytes);
+        } else if !bytes.is_empty() {
             results.push((source, bytes));
         }
+
+        prev_line_num = Some(line_num);
     }
     results
 }
@@ -383,3 +379,145 @@ pub const INDICES64: &[(Reg, &str)] = &[
     (R8, "r8"), (R9, "r9"), (R10, "r10"), (R11, "r11"),
     (R12, "r12"), (R13, "r13"), (R14, "r14"), (R15, "r15"),
 ];
+
+// ─── Additional register tables ──────────────────────────────────
+
+pub const REGS8_HIGH: &[(Reg, &str)] = &[
+    (AH, "ah"), (CH, "ch"), (DH, "dh"), (BH, "bh"),
+];
+
+pub const REGS8_SPL: &[(Reg, &str)] = &[
+    (SPL, "spl"), (BPL, "bpl"), (SIL, "sil"), (DIL, "dil"),
+];
+
+pub const REGS16_EXT: &[(Reg, &str)] = &[
+    (R8W, "r8w"), (R9W, "r9w"), (R10W, "r10w"), (R11W, "r11w"),
+    (R12W, "r12w"), (R13W, "r13w"), (R14W, "r14w"), (R15W, "r15w"),
+];
+
+pub const MMXS: &[(Reg, &str)] = &[
+    (MM0, "mm0"), (MM1, "mm1"), (MM2, "mm2"), (MM3, "mm3"),
+    (MM4, "mm4"), (MM5, "mm5"), (MM6, "mm6"), (MM7, "mm7"),
+];
+
+pub const OPMASKS: &[(Reg, &str)] = &[
+    (K0, "k0"), (K1, "k1"), (K2, "k2"), (K3, "k3"),
+    (K4, "k4"), (K5, "k5"), (K6, "k6"), (K7, "k7"),
+];
+
+pub const OPMASKS_NONZERO: &[(Reg, &str)] = &[
+    (K1, "k1"), (K2, "k2"), (K3, "k3"),
+    (K4, "k4"), (K5, "k5"), (K6, "k6"), (K7, "k7"),
+];
+
+pub const FPUS: &[(Reg, &str)] = &[
+    (ST0, "st0"), (ST1, "st1"), (ST2, "st2"), (ST3, "st3"),
+    (ST4, "st4"), (ST5, "st5"), (ST6, "st6"), (ST7, "st7"),
+];
+
+// ─── Memory operand helpers ──────────────────────────────────────
+
+/// Build representative address expressions (no size) for testing.
+/// Returns (RegExp, nasm_bracket_string) pairs.
+fn addr_exprs() -> Vec<(RegExp, String)> {
+    vec![
+        (RAX.into(), "[rax]".to_string()),
+        ((RCX + 0x10), "[rcx+0x10]".to_string()),
+        (RBP.into(), "[rbp]".to_string()),
+        (R13.into(), "[r13]".to_string()),
+        ((RAX + RCX * 4 + 0x100), "[rax+rcx*4+0x100]".to_string()),
+        ((R13 + R14 * 2 + 0x20), "[r13+r14*2+0x20]".to_string()),
+    ]
+}
+
+/// Generate sized memory operands using a given address constructor and NASM size prefix.
+fn mems_sized(
+    make_addr: fn(RegExp) -> Address,
+    nasm_prefix: &str,
+) -> Vec<(Address, String)> {
+    addr_exprs()
+        .into_iter()
+        .map(|(exp, bracket)| {
+            (make_addr(exp), format!("{} {}", nasm_prefix, bracket))
+        })
+        .collect()
+}
+
+pub fn mems8() -> Vec<(Address, String)> { mems_sized(byte_ptr, "byte") }
+pub fn mems16() -> Vec<(Address, String)> { mems_sized(word_ptr, "word") }
+pub fn mems32() -> Vec<(Address, String)> { mems_sized(dword_ptr, "dword") }
+pub fn mems64() -> Vec<(Address, String)> { mems_sized(qword_ptr, "qword") }
+pub fn mems128() -> Vec<(Address, String)> { mems_sized(xmmword_ptr, "oword") }
+pub fn mems256() -> Vec<(Address, String)> { mems_sized(ymmword_ptr, "yword") }
+pub fn mems512() -> Vec<(Address, String)> { mems_sized(zmmword_ptr, "zword") }
+
+/// Untyped memory operands (no size prefix, for instructions where size is implicit).
+pub fn mems_nosizeptr() -> Vec<(Address, String)> {
+    addr_exprs()
+        .into_iter()
+        .map(|(exp, bracket)| (ptr(exp), bracket))
+        .collect()
+}
+
+// ─── Prefix normalization ────────────────────────────────────────
+
+/// Normalize legacy prefix ordering.
+/// NASM and rxbyak may emit legacy prefixes (0x66, 0x67, 0xF2, 0xF3) in
+/// different orders. Sort leading prefixes so both sides match.
+pub fn normalize_prefix(bytes: &[u8]) -> Vec<u8> {
+    const LEGACY_PREFIXES: &[u8] = &[0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3];
+    let prefix_end = bytes.iter().position(|b| !LEGACY_PREFIXES.contains(b)).unwrap_or(bytes.len());
+    let mut prefixes = bytes[..prefix_end].to_vec();
+    prefixes.sort_unstable();
+    let mut result = prefixes;
+    result.extend_from_slice(&bytes[prefix_end..]);
+    result
+}
+
+/// Like `compare_nasm_batch` but normalizes legacy prefix order before comparing.
+pub fn compare_nasm_batch_normalized(
+    nasm_path: &str,
+    bits: u32,
+    instructions: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)>,
+) {
+    let nasm_source: String = instructions
+        .iter()
+        .map(|(asm, _)| asm.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let nasm_results = nasm_listing(nasm_path, &nasm_source, bits);
+
+    let mut failures = Vec::new();
+    for (i, (nasm_text, rxbyak_fn)) in instructions.into_iter().enumerate() {
+        let rxbyak_bytes = normalize_prefix(&assemble(rxbyak_fn));
+        let nasm_entry = nasm_results.get(i);
+
+        match nasm_entry {
+            Some((_, nasm_bytes)) => {
+                let nasm_norm = normalize_prefix(nasm_bytes);
+                if rxbyak_bytes != nasm_norm {
+                    failures.push(format!(
+                        "  [{}] {}\n    NASM:   {:02X?}\n    rxbyak: {:02X?}",
+                        i, nasm_text, nasm_norm, rxbyak_bytes
+                    ));
+                }
+            }
+            None => {
+                failures.push(format!(
+                    "  [{}] {} — no NASM listing entry (got {} entries)",
+                    i, nasm_text, nasm_results.len()
+                ));
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "NASM comparison failures ({}/{}):\n{}",
+            failures.len(),
+            nasm_results.len(),
+            failures.join("\n")
+        );
+    }
+}
