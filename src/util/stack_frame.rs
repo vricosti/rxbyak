@@ -171,7 +171,7 @@ impl StackFrame {
         // We need (save_num + P + 1) to be even for 16-byte alignment
         // (the +1 is the return address). So if P > 0 and P and save_num
         // have the same parity, add one more slot.
-        let mut p_slots = (stack_size + 7) / 8;
+        let mut p_slots = stack_size.div_ceil(8);
         if p_slots > 0 && (p_slots & 1) == (save_num & 1) {
             p_slots += 1;
         }
@@ -185,13 +185,13 @@ impl StackFrame {
         let mut pos = 0usize;
 
         let mut p = [Reg::gpr64(0); MAX_PARAMS];
-        for i in 0..p_num {
-            p[i] = get_reg_idx(&mut pos, use_rcx, use_rdx);
+        for slot in p.iter_mut().take(p_num) {
+            *slot = get_reg_idx(&mut pos, use_rcx, use_rdx);
         }
 
         let mut t = [Reg::gpr64(0); MAX_TEMPS];
-        for i in 0..t_num_actual {
-            t[i] = get_reg_idx(&mut pos, use_rcx, use_rdx);
+        for slot in t.iter_mut().take(t_num_actual) {
+            *slot = get_reg_idx(&mut pos, use_rcx, use_rdx);
         }
 
         // Preserve parameter values displaced by USE_RCX/USE_RDX.
