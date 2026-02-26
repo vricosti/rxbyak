@@ -3,35 +3,62 @@
 
 use super::Insn;
 
-// ─── TypeFlags constants (matching encoding_flags.rs) ────────────────────
-const T_N_VL: u64 = 1 << 3;
-const T_66: u64 = 1 << 5;
-const T_F3: u64 = 1 << 6;
-const T_0F: u64 = 1 << 8;
-const T_0F38: u64 = 1 << 9;
-const T_0F3A: u64 = 1 << 10;
-const T_W0: u64 = 1 << 13;
-const T_W1: u64 = 1 << 14;
-const T_EW1: u64 = 1 << 16;
-const T_YMM: u64 = 1 << 17;
-const T_EVEX: u64 = 1 << 18;
-const T_ER_X: u64 = 1 << 19;
-const T_ER_Z: u64 = 1 << 21;
-const T_SAE_X: u64 = 1 << 22;
-const T_SAE_Z: u64 = 1 << 24;
-const T_MUST_EVEX: u64 = 1 << 25;
-const T_B32: u64 = 1 << 26;
-const T_B64: u64 = 1 << 27;
-const T_MEM_EVEX: u64 = 1 << 30;
-const T_MAP5: u64 = 1 << 11;
-const T_F2: u64 = 1 << 37;
-
+// ─── TypeFlags constants (sorted to match xbyak avx_type_def.h) ──────────
+// Low 3 bits: disp8*N encoding
 const T_N1: u64 = 1;
 const T_N2: u64 = 2;
 const T_N4: u64 = 3;
 const T_N8: u64 = 4;
 const T_N16: u64 = 5;
-const T_DUP: u64 = 7;
+const T_N32: u64 = 6;
+#[allow(dead_code)]
+const T_NX_MASK: u64 = 7;
+const T_DUP: u64 = 7; // == T_NX_MASK
+const T_N_VL: u64 = 1 << 3;  // N * (1, 2, 4) for VL
+#[allow(dead_code)]
+const T_APX: u64 = 1 << 4;
+const T_66: u64 = 1 << 5;    // pp = 1
+const T_F3: u64 = 1 << 6;    // pp = 2
+#[allow(dead_code)]
+const T_ER_R: u64 = 1 << 7;  // reg{er}
+const T_0F: u64 = 1 << 8;
+const T_0F38: u64 = 1 << 9;
+const T_0F3A: u64 = 1 << 10;
+const T_MAP5: u64 = 1 << 11;
+#[allow(dead_code)]
+const T_L1: u64 = 1 << 12;
+const T_W0: u64 = 1 << 13;   // T_EW0 = T_W0
+const T_W1: u64 = 1 << 14;   // for VEX
+const T_EW1: u64 = 1 << 16;  // for EVEX
+const T_YMM: u64 = 1 << 17;  // support YMM, ZMM
+const T_EVEX: u64 = 1 << 18;
+const T_ER_X: u64 = 1 << 19; // xmm{er}
+#[allow(dead_code)]
+const T_ER_Y: u64 = 1 << 20; // ymm{er}
+const T_ER_Z: u64 = 1 << 21; // zmm{er}
+const T_SAE_X: u64 = 1 << 22; // xmm{sae}
+const T_SAE_Y: u64 = 1 << 23; // ymm{sae}
+const T_SAE_Z: u64 = 1 << 24; // zmm{sae}
+const T_MUST_EVEX: u64 = 1 << 25;
+const T_B32: u64 = 1 << 26;  // m32bcst
+const T_B64: u64 = 1 << 27;  // m64bcst
+const T_B16: u64 = (1 << 26) | (1 << 27); // m16bcst
+#[allow(dead_code)]
+const T_M_K: u64 = 1 << 28;  // mem{k}
+#[allow(dead_code)]
+const T_VSIB: u64 = 1 << 29;
+const T_MEM_EVEX: u64 = 1 << 30; // use evex if mem
+const T_MAP6: u64 = 1 << 31;
+#[allow(dead_code)]
+const T_NF: u64 = 1 << 32;   // T_nf
+#[allow(dead_code)]
+const T_CODE1_IF1: u64 = 1 << 33;
+// bit 34 unused
+#[allow(dead_code)]
+const T_ND1: u64 = 1 << 35;
+#[allow(dead_code)]
+const T_ZU: u64 = 1 << 36;
+const T_F2: u64 = 1 << 37;   // pp = 3
 
 const T_EW0: u64 = T_W0; // alias
 
@@ -214,6 +241,69 @@ pub static AVX_X_X_XM: &[Insn] = &[
     Insn::avx("vaesenclast", T_0F38 | T_66 | T_YMM | T_EVEX, 0xDD),
     Insn::avx("vaesdec", T_0F38 | T_66 | T_YMM | T_EVEX, 0xDE),
     Insn::avx("vaesdeclast", T_0F38 | T_66 | T_YMM | T_EVEX, 0xDF),
+
+    // FP16 3-operand arithmetic
+    Insn::avx("vaddph", T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_ER_Z | T_B16, 0x58),
+    Insn::avx("vaddsh", T_MAP5 | T_F3 | T_W0 | T_MUST_EVEX | T_ER_X | T_N2, 0x58),
+    Insn::avx("vsubph", T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_ER_Z | T_B16, 0x5C),
+    Insn::avx("vsubsh", T_MAP5 | T_F3 | T_W0 | T_MUST_EVEX | T_ER_X | T_N2, 0x5C),
+    Insn::avx("vmulph", T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_ER_Z | T_B16, 0x59),
+    Insn::avx("vmulsh", T_MAP5 | T_F3 | T_W0 | T_MUST_EVEX | T_ER_X | T_N2, 0x59),
+    Insn::avx("vdivph", T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_ER_Z | T_B16, 0x5E),
+    Insn::avx("vdivsh", T_MAP5 | T_F3 | T_W0 | T_MUST_EVEX | T_ER_X | T_N2, 0x5E),
+    Insn::avx("vmaxph", T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_SAE_Z | T_B16, 0x5F),
+    Insn::avx("vmaxsh", T_MAP5 | T_F3 | T_W0 | T_MUST_EVEX | T_SAE_X | T_N2, 0x5F),
+    Insn::avx("vminph", T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_SAE_Z | T_B16, 0x5D),
+    Insn::avx("vminsh", T_MAP5 | T_F3 | T_W0 | T_MUST_EVEX | T_SAE_X | T_N2, 0x5D),
+
+    // Insert (3-op + imm: ymm/zmm, ymm/zmm, xmm/m, imm8)
+    Insn::avx_imm("vinsertf128", T_0F3A | T_66 | T_W0 | T_YMM, 0x18),
+    Insn::avx_imm("vinserti128", T_0F3A | T_66 | T_W0 | T_YMM, 0x38),
+    Insn::avx_imm("vinsertf32x4", T_0F3A | T_66 | T_MUST_EVEX | T_W0 | T_YMM | T_N16, 0x18),
+    Insn::avx_imm("vinsertf64x2", T_0F3A | T_66 | T_MUST_EVEX | T_EW1 | T_YMM | T_N16, 0x18),
+    Insn::avx_imm("vinsertf32x8", T_0F3A | T_66 | T_MUST_EVEX | T_W0 | T_YMM | T_N32, 0x1A),
+    Insn::avx_imm("vinsertf64x4", T_0F3A | T_66 | T_MUST_EVEX | T_EW1 | T_YMM | T_N32, 0x1A),
+    Insn::avx_imm("vinserti32x4", T_0F3A | T_66 | T_MUST_EVEX | T_W0 | T_YMM | T_N16, 0x38),
+    Insn::avx_imm("vinserti64x2", T_0F3A | T_66 | T_MUST_EVEX | T_EW1 | T_YMM | T_N16, 0x38),
+    Insn::avx_imm("vinserti32x8", T_0F3A | T_66 | T_MUST_EVEX | T_W0 | T_YMM | T_N32, 0x3A),
+    Insn::avx_imm("vinserti64x4", T_0F3A | T_66 | T_MUST_EVEX | T_EW1 | T_YMM | T_N32, 0x3A),
+
+    // Permute 3-op (VEX)
+    Insn::avx_imm("vperm2f128", T_0F3A | T_66 | T_W0 | T_YMM, 0x06),
+    Insn::avx_imm("vperm2i128", T_0F3A | T_66 | T_W0 | T_YMM, 0x46),
+    Insn::avx("vpermd", T_66 | T_0F38 | T_W0 | T_YMM | T_EVEX | T_B32, 0x36),
+    Insn::avx("vpermps", T_66 | T_0F38 | T_W0 | T_YMM | T_EVEX | T_B32, 0x16),
+
+    // VNNI dot product
+    Insn::avx("vpdpbusd", T_66 | T_0F38 | T_W0 | T_YMM | T_EVEX | T_B32, 0x50),
+    Insn::avx("vpdpbusds", T_66 | T_0F38 | T_W0 | T_YMM | T_EVEX | T_B32, 0x51),
+    Insn::avx("vpdpwssd", T_66 | T_0F38 | T_W0 | T_YMM | T_EVEX | T_B32, 0x52),
+    Insn::avx("vpdpwssds", T_66 | T_0F38 | T_W0 | T_YMM | T_EVEX | T_B32, 0x53),
+
+    // VNNI INT8
+    Insn::avx("vpdpbssd", T_F2 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x50),
+    Insn::avx("vpdpbssds", T_F2 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x51),
+    Insn::avx("vpdpbsud", T_F3 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x50),
+    Insn::avx("vpdpbsuds", T_F3 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x51),
+    Insn::avx("vpdpbuud", T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x50),
+    Insn::avx("vpdpbuuds", T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x51),
+    Insn::avx("vpdpwsud", T_F3 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0xD2),
+    Insn::avx("vpdpwsuds", T_F3 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0xD3),
+    Insn::avx("vpdpwusd", T_66 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0xD2),
+    Insn::avx("vpdpwusds", T_66 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0xD3),
+    Insn::avx("vpdpwuud", T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0xD2),
+    Insn::avx("vpdpwuuds", T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0xD3),
+
+    // FP16 complex multiply
+    Insn::avx("vfmaddcph", T_F3 | T_MAP6 | T_W0 | T_MUST_EVEX | T_ER_Z | T_YMM | T_B32, 0x56),
+    Insn::avx("vfcmaddcph", T_F2 | T_MAP6 | T_W0 | T_MUST_EVEX | T_ER_Z | T_YMM | T_B32, 0x56),
+    Insn::avx("vfmulcph", T_F3 | T_MAP6 | T_W0 | T_MUST_EVEX | T_ER_Z | T_YMM | T_B32, 0xD6),
+    Insn::avx("vfcmulcph", T_F2 | T_MAP6 | T_W0 | T_MUST_EVEX | T_ER_Z | T_YMM | T_B32, 0xD6),
+
+    // SHA-512
+    Insn::avx("vsha512msg1", T_F2 | T_0F38 | T_W0 | T_MUST_EVEX, 0xCC),
+    Insn::avx("vsha512msg2", T_F2 | T_0F38 | T_W0 | T_MUST_EVEX, 0xCD),
+    Insn::avx("vsha512rnds2", T_F2 | T_0F38 | T_W0 | T_MUST_EVEX, 0xCB),
 ];
 
 // ─── SSE 2-operand instructions (from suffix expansion table) ────────────
@@ -424,6 +514,28 @@ pub static SSE_2OP: &[Insn] = &[
     Insn::sse_imm("pshufd", T_0F | T_66, 0x70),
     Insn::sse_imm("pshufhw", T_0F | T_F3, 0x70),
     Insn::sse_imm("pshuflw", T_0F | T_F2, 0x70),
+
+    // Missing SSE2 basic max/min
+    Insn::sse("pmaxsw", T_0F | T_66, 0xEE),
+    Insn::sse("pmaxub", T_0F | T_66, 0xDE),
+    Insn::sse("pminsw", T_0F | T_66, 0xEA),
+    Insn::sse("pminub", T_0F | T_66, 0xDA),
+    // SSE4.1 missing
+    Insn::sse("pmovmskb", T_0F | T_66, 0xD7),
+    // SSE2 lddqu
+    Insn::sse("lddqu", T_0F | T_F2, 0xF0),
+    // GFNI (legacy SSE forms)
+    Insn::sse_imm("gf2p8affineinvqb", T_66 | T_0F3A, 0xCF),
+    Insn::sse_imm("gf2p8affineqb", T_66 | T_0F3A, 0xCE),
+    Insn::sse("gf2p8mulb", T_66 | T_0F38, 0xCF),
+    // SHA (legacy SSE)
+    Insn::sse("sha1nexte", T_0F38, 0xC8),
+    Insn::sse("sha1msg1", T_0F38, 0xC9),
+    Insn::sse("sha1msg2", T_0F38, 0xCA),
+    Insn::sse_imm("sha1rnds4", T_0F3A, 0xCC),
+    Insn::sse("sha256msg1", T_0F38, 0xCC),
+    Insn::sse("sha256msg2", T_0F38, 0xCD),
+    Insn::sse("sha256rnds2", T_0F38, 0xCB),
 ];
 
 // ─── AVX 2-operand (no vvvv) ─────────────────────────────────────────────
@@ -507,6 +619,39 @@ pub static AVX_X_XM: &[Insn] = &[
     Insn::vex_xm("vpmovzxwd", T_0F38 | T_66 | T_YMM | T_EVEX | T_N8 | T_N_VL, 0x33),
     Insn::vex_xm("vpmovzxwq", T_0F38 | T_66 | T_YMM | T_EVEX | T_N4 | T_N_VL, 0x34),
     Insn::vex_xm("vpmovzxdq", T_0F38 | T_66 | T_YMM | T_EVEX | T_W0 | T_N8 | T_N_VL, 0x35),
+
+    // Missing broadcasts
+    Insn::vex_xm("vbroadcastsd", T_0F38 | T_66 | T_W0 | T_YMM | T_EVEX | T_EW1 | T_N8, 0x19),
+    Insn::vex_xm("vbroadcastf128", T_0F38 | T_66 | T_W0 | T_YMM, 0x1A),
+    Insn::vex_xm("vbroadcasti128", T_0F38 | T_66 | T_W0 | T_YMM, 0x5A),
+    Insn::vex_xm("vbroadcastf32x2", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_N8, 0x19),
+    Insn::vex_xm("vbroadcastf32x4", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_N16, 0x1A),
+    Insn::vex_xm("vbroadcastf64x2", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_EW1 | T_N16, 0x1A),
+    Insn::vex_xm("vbroadcastf32x8", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_N32, 0x1B),
+    Insn::vex_xm("vbroadcastf64x4", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_EW1 | T_N32, 0x1B),
+    Insn::vex_xm("vbroadcasti32x2", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_N8, 0x59),
+    Insn::vex_xm("vbroadcasti32x4", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_N16, 0x5A),
+    Insn::vex_xm("vbroadcasti64x2", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_EW1 | T_N16, 0x5A),
+    Insn::vex_xm("vbroadcasti32x8", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_N32, 0x5B),
+    Insn::vex_xm("vbroadcasti64x4", T_66 | T_0F38 | T_YMM | T_MUST_EVEX | T_EW1 | T_N32, 0x5B),
+
+    // Widening conversions (2-op, half-width source)
+    Insn::vex_xm("vcvtdq2pd", T_0F | T_F3 | T_YMM | T_EVEX | T_W0 | T_B32 | T_N8 | T_N_VL, 0xE6),
+    Insn::vex_xm("vcvtps2pd", T_0F | T_YMM | T_EVEX | T_W0 | T_B32 | T_N8 | T_N_VL | T_SAE_Y, 0x5A),
+    Insn::vex_xm("vcvtph2ps", T_0F38 | T_66 | T_W0 | T_EVEX | T_YMM | T_N8 | T_N_VL | T_SAE_Y, 0x13),
+    Insn::vex_xm("vcvtudq2pd", T_N8 | T_N_VL | T_F3 | T_0F | T_W0 | T_YMM | T_MUST_EVEX | T_B32, 0x7A),
+
+    // Narrowing conversions (2-op, dst narrower than src)
+    Insn::vex_xm("vcvtpd2dq", T_0F | T_F2 | T_YMM | T_EVEX | T_EW1 | T_B64 | T_ER_Z | T_N16 | T_N_VL, 0xE6),
+    Insn::vex_xm("vcvtpd2ps", T_0F | T_66 | T_YMM | T_EVEX | T_EW1 | T_B64 | T_ER_Z | T_N16 | T_N_VL, 0x5A),
+    Insn::vex_xm("vcvttpd2dq", T_66 | T_0F | T_YMM | T_EVEX | T_EW1 | T_B64 | T_SAE_Z | T_N16 | T_N_VL, 0xE6),
+
+    // vlddqu
+    Insn::vex_xm("vlddqu", T_0F | T_F2 | T_W0 | T_YMM, 0xF0),
+
+    // vpbroadcastmb2q / vpbroadcastmw2d (k-register source -> xmm/ymm/zmm)
+    Insn::vex_xm("vpbroadcastmb2q", T_F3 | T_0F38 | T_MUST_EVEX | T_YMM | T_EW1, 0x2A),
+    Insn::vex_xm("vpbroadcastmw2d", T_F3 | T_0F38 | T_MUST_EVEX | T_YMM | T_W0, 0x3A),
 ];
 
 // ─── AVX VEX move instructions (bidirectional: load + store) ─────────────

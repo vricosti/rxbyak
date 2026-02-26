@@ -3,38 +3,69 @@
 
 use super::Insn;
 
-// ─── TypeFlags constants (matching encoding_flags.rs) ────────────────────
-const T_N_VL: u64 = 1 << 3;
-const T_66: u64 = 1 << 5;
-const T_F3: u64 = 1 << 6;
+// ─── TypeFlags constants (sorted to match xbyak avx_type_def.h) ──────────
+// Low 3 bits: disp8*N encoding
+const T_N1: u64 = 1;
+const T_N2: u64 = 2;
+const T_N4: u64 = 3;
+const T_N8: u64 = 4;
+const T_N16: u64 = 5;
+#[allow(dead_code)]
+const T_N32: u64 = 6;
+#[allow(dead_code)]
+const T_NX_MASK: u64 = 7;
+#[allow(dead_code)]
+const T_DUP: u64 = 7; // == T_NX_MASK
+const T_N_VL: u64 = 1 << 3;  // N * (1, 2, 4) for VL
+#[allow(dead_code)]
+const T_APX: u64 = 1 << 4;
+const T_66: u64 = 1 << 5;    // pp = 1
+const T_F3: u64 = 1 << 6;    // pp = 2
+#[allow(dead_code)]
+const T_ER_R: u64 = 1 << 7;  // reg{er}
 const T_0F: u64 = 1 << 8;
 const T_0F38: u64 = 1 << 9;
 const T_0F3A: u64 = 1 << 10;
 const T_MAP5: u64 = 1 << 11;
 #[allow(dead_code)]
 const T_L1: u64 = 1 << 12;
-const T_W0: u64 = 1 << 13;
+const T_W0: u64 = 1 << 13;   // T_EW0 = T_W0
 #[allow(dead_code)]
-const T_W1: u64 = 1 << 14;
-const T_EW1: u64 = 1 << 16;
-const T_YMM: u64 = 1 << 17;
-const T_ER_X: u64 = 1 << 19;
-const T_ER_Z: u64 = 1 << 21;
-const T_SAE_X: u64 = 1 << 22;
-const T_SAE_Z: u64 = 1 << 24;
+const T_W1: u64 = 1 << 14;   // for VEX
+const T_EW1: u64 = 1 << 16;  // for EVEX
+const T_YMM: u64 = 1 << 17;  // support YMM, ZMM
+#[allow(dead_code)]
+const T_EVEX: u64 = 1 << 18;
+const T_ER_X: u64 = 1 << 19; // xmm{er}
+const T_ER_Y: u64 = 1 << 20; // ymm{er}
+const T_ER_Z: u64 = 1 << 21; // zmm{er}
+const T_SAE_X: u64 = 1 << 22; // xmm{sae}
+const T_SAE_Y: u64 = 1 << 23; // ymm{sae}
+const T_SAE_Z: u64 = 1 << 24; // zmm{sae}
 const T_MUST_EVEX: u64 = 1 << 25;
-const T_B32: u64 = 1 << 26;
-const T_B64: u64 = 1 << 27;
-const T_B16: u64 = (1 << 26) | (1 << 27);
-const T_MAP6: u64 = 1 << 31;
-const T_F2: u64 = 1 << 37;
-
-const T_N1: u64 = 1;
-const T_N2: u64 = 2;
-const T_N4: u64 = 3;
-const T_N8: u64 = 4;
+const T_B32: u64 = 1 << 26;  // m32bcst
+const T_B64: u64 = 1 << 27;  // m64bcst
+const T_B16: u64 = (1 << 26) | (1 << 27); // m16bcst
 #[allow(dead_code)]
-const T_N16: u64 = 5;
+const T_M_K: u64 = 1 << 28;  // mem{k}
+#[allow(dead_code)]
+const T_VSIB: u64 = 1 << 29;
+#[allow(dead_code)]
+const T_MEM_EVEX: u64 = 1 << 30; // use evex if mem
+const T_MAP6: u64 = 1 << 31;
+#[allow(dead_code)]
+const T_NF: u64 = 1 << 32;   // T_nf
+#[allow(dead_code)]
+const T_CODE1_IF1: u64 = 1 << 33;
+// bit 34 unused
+#[allow(dead_code)]
+const T_ND1: u64 = 1 << 35;
+#[allow(dead_code)]
+const T_ZU: u64 = 1 << 36;
+const T_F2: u64 = 1 << 37;   // pp = 3
+
+#[allow(dead_code)]
+const T_EW0: u64 = T_W0; // alias
 
 // ─── AVX-512 compare: K result instructions ──────────────────────────────
 // Pattern: K, XMM/YMM/ZMM, XMM/YMM/ZMM/M [, imm8]
@@ -281,6 +312,36 @@ pub static AVX512_X_X_XM: &[Insn] = &[
     Insn::avx_imm("vminmaxsd", T_MUST_EVEX | T_66 | T_0F3A | T_EW1 | T_SAE_X | T_N8, 0x53),
     Insn::avx_imm("vminmaxsh", T_MUST_EVEX | T_0F3A | T_W0 | T_SAE_X | T_N2, 0x53),
     Insn::avx_imm("vminmaxss", T_MUST_EVEX | T_66 | T_0F3A | T_W0 | T_SAE_X | T_N4, 0x53),
+
+    // 2ph conversions (3-op)
+    Insn::avx("vcvt2ph2bf8", T_MUST_EVEX | T_66 | T_MAP5 | T_W0 | T_YMM | T_B16, 0x74),
+    Insn::avx("vcvt2ph2bf8s", T_MUST_EVEX | T_66 | T_MAP5 | T_W0 | T_YMM | T_B16, 0x74),
+    Insn::avx("vcvt2ph2hf8", T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16, 0x18),
+    Insn::avx("vcvt2ph2hf8s", T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16, 0x1B),
+    Insn::avx("vcvtbiasph2bf8", T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16, 0x74),
+    Insn::avx("vcvtbiasph2bf8s", T_MUST_EVEX | T_66 | T_MAP5 | T_W0 | T_YMM | T_B16, 0x74),
+    Insn::avx("vcvtbiasph2hf8", T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16, 0x18),
+    Insn::avx("vcvtbiasph2hf8s", T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16, 0x1B),
+
+    // v4fmadd/fnmadd (AVX-512_4FMAPS)
+    Insn::avx("v4fmaddps", T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16, 0x9A),
+    Insn::avx("v4fmaddss", T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16, 0x9B),
+    Insn::avx("v4fnmaddps", T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16, 0xAA),
+    Insn::avx("v4fnmaddss", T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16, 0xAB),
+
+    // v4dpwssd/v4dpwssds (AVX-512_4VNNIW)
+    Insn::avx("vp4dpwssd", T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16, 0x52),
+    Insn::avx("vp4dpwssds", T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16, 0x53),
+
+    // vp2intersect
+    Insn::avx_k("vp2intersectd", T_F2 | T_0F38 | T_YMM | T_MUST_EVEX | T_W0 | T_B32, 0x68),
+    Insn::avx_k("vp2intersectq", T_F2 | T_0F38 | T_YMM | T_MUST_EVEX | T_EW1 | T_B64, 0x68),
+
+    // vpshufbitqmb
+    Insn::avx_k("vpshufbitqmb", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_W0, 0x8F),
+
+    // BF16 compare
+    Insn::avx_k_imm("vcmpbf16", T_F2 | T_0F3A | T_MUST_EVEX | T_W0 | T_YMM | T_B16, 0xC2),
 ];
 
 // ─── AVX-512 2-operand EVEX-only ─────────────────────────────────────────
@@ -399,6 +460,75 @@ pub static AVX512_X_XM: &[Insn] = &[
     Insn::vex_xm_imm("vreducebf16", T_MUST_EVEX | T_F2 | T_0F3A | T_W0 | T_YMM | T_B16, 0x56),
     Insn::vex_xm_imm("vrndscalebf16", T_MUST_EVEX | T_F2 | T_0F3A | T_W0 | T_YMM | T_B16, 0x08),
     Insn::vex_xm("vrsqrtbf16", T_MUST_EVEX | T_MAP6 | T_W0 | T_YMM | T_B16, 0x4E),
+
+    // Missing EVEX-only conversions (widening, half-width source)
+    Insn::vex_xm("vcvtps2qq", T_N8 | T_N_VL | T_66 | T_0F | T_W0 | T_YMM | T_ER_Y | T_MUST_EVEX | T_B32, 0x7B),
+    Insn::vex_xm("vcvtps2uqq", T_N8 | T_N_VL | T_66 | T_0F | T_W0 | T_YMM | T_ER_Y | T_MUST_EVEX | T_B32, 0x79),
+    Insn::vex_xm("vcvttps2qq", T_N8 | T_N_VL | T_66 | T_0F | T_W0 | T_YMM | T_SAE_Y | T_MUST_EVEX | T_B32, 0x7A),
+    Insn::vex_xm("vcvttps2uqq", T_N8 | T_N_VL | T_66 | T_0F | T_W0 | T_YMM | T_SAE_Y | T_MUST_EVEX | T_B32, 0x78),
+
+    // Missing narrowing conversions
+    Insn::vex_xm("vcvtpd2udq", T_0F | T_EW1 | T_YMM | T_ER_Z | T_MUST_EVEX | T_B64 | T_N16 | T_N_VL, 0x79),
+    Insn::vex_xm("vcvttpd2udq", T_0F | T_EW1 | T_YMM | T_SAE_Z | T_MUST_EVEX | T_B64 | T_N16 | T_N_VL, 0x78),
+    Insn::vex_xm("vcvtqq2ps", T_0F | T_EW1 | T_YMM | T_ER_Z | T_MUST_EVEX | T_B64 | T_N16 | T_N_VL, 0x5B),
+    Insn::vex_xm("vcvtuqq2ps", T_F2 | T_0F | T_EW1 | T_YMM | T_ER_Z | T_MUST_EVEX | T_B64 | T_N16 | T_N_VL, 0x7A),
+
+    // FP16 widening conversions
+    Insn::vex_xm("vcvtph2dq", T_N8 | T_N_VL | T_66 | T_MAP5 | T_W0 | T_YMM | T_ER_Y | T_MUST_EVEX | T_B16, 0x5B),
+    Insn::vex_xm("vcvtph2pd", T_N4 | T_N_VL | T_MAP5 | T_W0 | T_YMM | T_SAE_X | T_MUST_EVEX | T_B16, 0x5A),
+    Insn::vex_xm("vcvtph2psx", T_N8 | T_N_VL | T_66 | T_MAP6 | T_W0 | T_YMM | T_SAE_Y | T_MUST_EVEX | T_B16, 0x13),
+    Insn::vex_xm("vcvtph2qq", T_N4 | T_N_VL | T_66 | T_MAP5 | T_W0 | T_YMM | T_ER_X | T_MUST_EVEX | T_B16, 0x7B),
+    Insn::vex_xm("vcvtph2udq", T_N8 | T_N_VL | T_MAP5 | T_W0 | T_YMM | T_ER_Y | T_MUST_EVEX | T_B16, 0x79),
+    Insn::vex_xm("vcvtph2uqq", T_N4 | T_N_VL | T_66 | T_MAP5 | T_W0 | T_YMM | T_ER_X | T_MUST_EVEX | T_B16, 0x79),
+    Insn::vex_xm("vcvthf82ph", T_MUST_EVEX | T_F2 | T_MAP5 | T_W0 | T_YMM | T_N1, 0x1E),
+    Insn::vex_xm("vcvttph2dq", T_N8 | T_N_VL | T_F3 | T_MAP5 | T_W0 | T_YMM | T_SAE_Y | T_MUST_EVEX | T_B16, 0x5B),
+    Insn::vex_xm("vcvttph2qq", T_N4 | T_N_VL | T_66 | T_MAP5 | T_W0 | T_YMM | T_SAE_X | T_MUST_EVEX | T_B16, 0x7A),
+    Insn::vex_xm("vcvttph2udq", T_N8 | T_N_VL | T_MAP5 | T_W0 | T_YMM | T_SAE_Y | T_MUST_EVEX | T_B16, 0x78),
+    Insn::vex_xm("vcvttph2uqq", T_N4 | T_N_VL | T_66 | T_MAP5 | T_W0 | T_YMM | T_SAE_X | T_MUST_EVEX | T_B16, 0x78),
+
+    // FP16/BF8 narrowing conversions
+    Insn::vex_xm("vcvtph2bf8", T_F3 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B16 | T_N16 | T_N_VL, 0x74),
+    Insn::vex_xm("vcvtph2bf8s", T_F3 | T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_B16 | T_N16 | T_N_VL, 0x74),
+    Insn::vex_xm("vcvtph2hf8", T_F3 | T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_B16 | T_N16 | T_N_VL, 0x18),
+    Insn::vex_xm("vcvtph2hf8s", T_F3 | T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_B16 | T_N16 | T_N_VL, 0x1B),
+    Insn::vex_xm("vcvtneps2bf16", T_F3 | T_0F38 | T_W0 | T_YMM | T_SAE_Z | T_B32 | T_MUST_EVEX | T_N16 | T_N_VL, 0x72),
+    Insn::vex_xm("vcvtps2phx", T_N16 | T_N_VL | T_66 | T_MAP5 | T_W0 | T_ER_Z | T_MUST_EVEX | T_B32, 0x1D),
+
+    // Narrowing FP16 output
+    Insn::vex_xm("vcvtdq2ph", T_N16 | T_N_VL | T_MAP5 | T_W0 | T_YMM | T_ER_Z | T_MUST_EVEX | T_B32, 0x5B),
+    Insn::vex_xm("vcvtpd2ph", T_N16 | T_N_VL | T_66 | T_MAP5 | T_EW1 | T_ER_Z | T_MUST_EVEX | T_B64, 0x5A),
+    Insn::vex_xm("vcvtqq2ph", T_N16 | T_N_VL | T_MAP5 | T_EW1 | T_ER_Z | T_MUST_EVEX | T_B64, 0x5B),
+    Insn::vex_xm("vcvtudq2ph", T_N16 | T_N_VL | T_F2 | T_MAP5 | T_W0 | T_ER_Z | T_MUST_EVEX | T_B32, 0x7A),
+    Insn::vex_xm("vcvtuqq2ph", T_N16 | T_N_VL | T_F2 | T_MAP5 | T_EW1 | T_ER_Z | T_MUST_EVEX | T_B64, 0x7A),
+
+    // Truncating conversions with saturation (AVX10.2)
+    Insn::vex_xm("vcvttpd2dqs", T_MUST_EVEX | T_YMM | T_MAP5 | T_EW1 | T_B64 | T_SAE_Z | T_N16 | T_N_VL, 0x6D),
+    Insn::vex_xm("vcvttpd2udqs", T_MUST_EVEX | T_YMM | T_MAP5 | T_EW1 | T_B64 | T_SAE_Z | T_N16 | T_N_VL, 0x6C),
+    Insn::vex_xm("vcvttps2qqs", T_MUST_EVEX | T_YMM | T_66 | T_MAP5 | T_W0 | T_B32 | T_SAE_Y | T_N8 | T_N_VL, 0x6D),
+    Insn::vex_xm("vcvttps2uqqs", T_MUST_EVEX | T_YMM | T_66 | T_MAP5 | T_W0 | T_B32 | T_SAE_Y | T_N8 | T_N_VL, 0x6C),
+    Insn::vex_xm("vcvttsd2sis", T_MUST_EVEX | T_F2 | T_MAP5 | T_EW1 | T_SAE_X | T_N8, 0x6D),
+    Insn::vex_xm("vcvttsd2usis", T_MUST_EVEX | T_F2 | T_MAP5 | T_EW1 | T_SAE_X | T_N8, 0x6C),
+    Insn::vex_xm("vcvttss2sis", T_MUST_EVEX | T_F3 | T_MAP5 | T_W0 | T_SAE_X | T_N4, 0x6D),
+    Insn::vex_xm("vcvttss2usis", T_MUST_EVEX | T_F3 | T_MAP5 | T_W0 | T_SAE_X | T_N4, 0x6C),
+
+    // exp2 (AVX-512ER)
+    Insn::vex_xm("vexp2pd", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_EW1 | T_B64 | T_SAE_Z, 0xC8),
+    Insn::vex_xm("vexp2ps", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_W0 | T_B32 | T_SAE_Z, 0xC8),
+
+    // rcp28/rsqrt28 packed
+    Insn::vex_xm("vrcp28pd", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_EW1 | T_B64 | T_SAE_Z, 0xCA),
+    Insn::vex_xm("vrcp28ps", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_W0 | T_B32 | T_SAE_Z, 0xCA),
+    Insn::vex_xm("vrsqrt28pd", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_EW1 | T_B64 | T_SAE_Z, 0xCC),
+    Insn::vex_xm("vrsqrt28ps", T_66 | T_0F38 | T_MUST_EVEX | T_YMM | T_W0 | T_B32 | T_SAE_Z, 0xCC),
+
+    // fpclass (K-result with imm)
+    Insn::vex_xm_imm("vfpclasspd", T_66 | T_0F3A | T_MUST_EVEX | T_YMM | T_EW1 | T_B64, 0x66),
+    Insn::vex_xm_imm("vfpclassps", T_66 | T_0F3A | T_MUST_EVEX | T_YMM | T_W0 | T_B32, 0x66),
+    Insn::vex_xm_imm("vfpclassph", T_0F3A | T_MUST_EVEX | T_YMM | T_W0 | T_B16, 0x66),
+    Insn::vex_xm_imm("vfpclassbf16", T_F2 | T_0F3A | T_MUST_EVEX | T_YMM | T_W0 | T_B16, 0x66),
+    Insn::vex_xm_imm("vfpclasssd", T_66 | T_0F3A | T_MUST_EVEX | T_EW1 | T_N8, 0x67),
+    Insn::vex_xm_imm("vfpclassss", T_66 | T_0F3A | T_MUST_EVEX | T_W0 | T_N4, 0x67),
+    Insn::vex_xm_imm("vfpclasssh", T_0F3A | T_MUST_EVEX | T_W0 | T_N2, 0x67),
 ];
 
 // ─── FP16 FMA instructions ───────────────────────────────────────────────
