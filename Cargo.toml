@@ -1,0 +1,19 @@
+[package]
+name = "rxbyak"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of xbyak - x86/x64 JIT assembler"
+license = "BSD-3-Clause"
+
+[dependencies]
+bitflags = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+    "Win32_Foundation",
+] }
