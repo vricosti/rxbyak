@@ -25,3 +25,6 @@ pub use address::{xmmword_ptr, ymmword_ptr, zmmword_ptr, broadcast_ptr};
 
 // Re-export all register constants
 pub use reg::*;
+
+// Re-export StackFrame utilities
+pub use util::stack_frame::{StackFrame, USE_RCX, USE_RDX};
