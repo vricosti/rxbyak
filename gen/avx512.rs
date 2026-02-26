@@ -1,5 +1,5 @@
+#![allow(dead_code)] // Constants kept for completeness matching xbyak avx_type_def.h
 /// AVX-512 instruction tables from gen_avx512.cpp.
-/// These cover EVEX-only instructions (T_MUST_EVEX), FP16, BF16, etc.
 
 use super::Insn;
 
@@ -10,31 +10,23 @@ const T_N2: u64 = 2;
 const T_N4: u64 = 3;
 const T_N8: u64 = 4;
 const T_N16: u64 = 5;
-#[allow(dead_code)]
 const T_N32: u64 = 6;
-#[allow(dead_code)]
 const T_NX_MASK: u64 = 7;
-#[allow(dead_code)]
 const T_DUP: u64 = 7; // == T_NX_MASK
 const T_N_VL: u64 = 1 << 3;  // N * (1, 2, 4) for VL
-#[allow(dead_code)]
 const T_APX: u64 = 1 << 4;
 const T_66: u64 = 1 << 5;    // pp = 1
 const T_F3: u64 = 1 << 6;    // pp = 2
-#[allow(dead_code)]
 const T_ER_R: u64 = 1 << 7;  // reg{er}
 const T_0F: u64 = 1 << 8;
 const T_0F38: u64 = 1 << 9;
 const T_0F3A: u64 = 1 << 10;
 const T_MAP5: u64 = 1 << 11;
-#[allow(dead_code)]
 const T_L1: u64 = 1 << 12;
 const T_W0: u64 = 1 << 13;   // T_EW0 = T_W0
-#[allow(dead_code)]
 const T_W1: u64 = 1 << 14;   // for VEX
 const T_EW1: u64 = 1 << 16;  // for EVEX
 const T_YMM: u64 = 1 << 17;  // support YMM, ZMM
-#[allow(dead_code)]
 const T_EVEX: u64 = 1 << 18;
 const T_ER_X: u64 = 1 << 19; // xmm{er}
 const T_ER_Y: u64 = 1 << 20; // ymm{er}
@@ -46,25 +38,17 @@ const T_MUST_EVEX: u64 = 1 << 25;
 const T_B32: u64 = 1 << 26;  // m32bcst
 const T_B64: u64 = 1 << 27;  // m64bcst
 const T_B16: u64 = (1 << 26) | (1 << 27); // m16bcst
-#[allow(dead_code)]
 const T_M_K: u64 = 1 << 28;  // mem{k}
-#[allow(dead_code)]
 const T_VSIB: u64 = 1 << 29;
-#[allow(dead_code)]
 const T_MEM_EVEX: u64 = 1 << 30; // use evex if mem
 const T_MAP6: u64 = 1 << 31;
-#[allow(dead_code)]
 const T_NF: u64 = 1 << 32;   // T_nf
-#[allow(dead_code)]
 const T_CODE1_IF1: u64 = 1 << 33;
 // bit 34 unused
-#[allow(dead_code)]
 const T_ND1: u64 = 1 << 35;
-#[allow(dead_code)]
 const T_ZU: u64 = 1 << 36;
 const T_F2: u64 = 1 << 37;   // pp = 3
 
-#[allow(dead_code)]
 const T_EW0: u64 = T_W0; // alias
 
 // ─── AVX-512 compare: K result instructions ──────────────────────────────
