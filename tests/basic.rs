@@ -238,6 +238,34 @@ fn test_ror_rdx_cl() {
 }
 
 #[test]
+fn test_bt_eax_imm() {
+    // bt eax, 5 → 0F BA E0 05
+    let code = assemble(|a| a.bt_imm(EAX, 5));
+    assert_eq!(code, [0x0F, 0xBA, 0xE0, 0x05]);
+}
+
+#[test]
+fn test_bts_rax_imm() {
+    // bts rax, 7 → 48 0F BA E8 07
+    let code = assemble(|a| a.bts_imm(RAX, 7));
+    assert_eq!(code, [0x48, 0x0F, 0xBA, 0xE8, 0x07]);
+}
+
+#[test]
+fn test_btr_ecx_imm() {
+    // btr ecx, 3 → 0F BA F1 03
+    let code = assemble(|a| a.btr_imm(ECX, 3));
+    assert_eq!(code, [0x0F, 0xBA, 0xF1, 0x03]);
+}
+
+#[test]
+fn test_btc_rdx_imm() {
+    // btc rdx, 10 → 48 0F BA FA 0A
+    let code = assemble(|a| a.btc_imm(RDX, 10));
+    assert_eq!(code, [0x48, 0x0F, 0xBA, 0xFA, 0x0A]);
+}
+
+#[test]
 fn test_label_forward_jmp() {
     let code = assemble(|a| {
         let label = a.create_label();

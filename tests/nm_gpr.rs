@@ -947,6 +947,43 @@ fn test_nm_bt() {
         }
     }
 
+    // bt/bts/btr/btc reg, imm8
+    let imm_ops: &[(&str, fn(&mut CodeAssembler, Reg, u8) -> Result<()>)] = &[
+        ("bt",  |a, r, i| a.bt_imm(r, i)),
+        ("bts", |a, r, i| a.bts_imm(r, i)),
+        ("btr", |a, r, i| a.btr_imm(r, i)),
+        ("btc", |a, r, i| a.btc_imm(r, i)),
+    ];
+    let imms: &[u8] = &[0, 5, 31];
+    for &(name, op_fn) in imm_ops {
+        for &(dst, dn, _, _) in pairs32 {
+            for &imm in imms {
+                let asm = format!("{} {}, {}", name, dn, imm);
+                insns.push((asm, Box::new(move |a: &mut CodeAssembler| op_fn(a, dst, imm))));
+            }
+        }
+        for &(dst, dn, _, _) in pairs64 {
+            for &imm in imms {
+                let asm = format!("{} {}, {}", name, dn, imm);
+                insns.push((asm, Box::new(move |a: &mut CodeAssembler| op_fn(a, dst, imm))));
+            }
+        }
+    }
+
+    // bt/bts/btr/btc mem, imm8
+    let imm_mem_ops: &[(&str, fn(&mut CodeAssembler, Address, u8) -> Result<()>)] = &[
+        ("bt",  |a, m, i| a.bt_imm(m, i)),
+        ("bts", |a, m, i| a.bts_imm(m, i)),
+        ("btr", |a, m, i| a.btr_imm(m, i)),
+        ("btc", |a, m, i| a.btc_imm(m, i)),
+    ];
+    for &(name, op_fn) in imm_mem_ops {
+        for (addr, nasm_mem) in mems32() {
+            let asm = format!("{} {}, 5", name, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| op_fn(a, addr, 5))));
+        }
+    }
+
     compare_nasm_batch(&nasm, 64, insns);
 }
 

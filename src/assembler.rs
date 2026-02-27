@@ -1502,6 +1502,27 @@ impl CodeAssembler {
         }
     }
 
+    fn bt_imm_op(&mut self, op: RegMem, ext: u8, imm: u8) -> Result<()> {
+        self.buf.op_rext(&op, ext, TypeFlags::T_0F, 0xBA, 1)?;
+        self.buf.db(imm)
+    }
+    /// `bt r/m, imm8` — 0F BA /4 ib
+    pub fn bt_imm(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.bt_imm_op(op.into(), 4, imm)
+    }
+    /// `bts r/m, imm8` — 0F BA /5 ib
+    pub fn bts_imm(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.bt_imm_op(op.into(), 5, imm)
+    }
+    /// `btr r/m, imm8` — 0F BA /6 ib
+    pub fn btr_imm(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.bt_imm_op(op.into(), 6, imm)
+    }
+    /// `btc r/m, imm8` — 0F BA /7 ib
+    pub fn btc_imm(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.bt_imm_op(op.into(), 7, imm)
+    }
+
     // ── Rotate ────────────────────────────────────────────────
     fn rotate_op(&mut self, op: &RegMem, ext: u8, count: u8) -> Result<()> {
         if count == 1 {
