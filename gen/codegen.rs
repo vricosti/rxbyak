@@ -39,7 +39,7 @@ const HANDWRITTEN: &[&str] = &[
     "sets", "setns", "setp", "setpe", "setnp", "setpo", "setl", "setnge",
     "setge", "setnl", "setle", "setng", "setg", "setnle",
     // Bit operations (hand-written)
-    "bsf", "bsr", "popcnt", "lzcnt", "tzcnt", "bt", "bts", "btr", "btc",
+    "bsf", "bsr", "popcnt", "lzcnt", "tzcnt", "crc32", "bt", "bts", "btr", "btc",
     // Rotate (hand-written)
     "rol", "ror", "rcl", "rcr",
     // Single-operand GPR (hand-written)

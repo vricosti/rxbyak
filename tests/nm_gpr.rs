@@ -1304,6 +1304,80 @@ fn test_nm_prefetch() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// CRC32
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_nm_crc32() {
+    let nasm = skip_if_no_nasm!();
+    let mut insns: Vec<NmPair> = Vec::new();
+
+    // crc32 r32, r8
+    for &(dst, dn) in &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")] {
+        for &(src, sn) in &[(AL, "al"), (BL, "bl"), (CL, "cl"), (R8B, "r8b")] {
+            let asm = format!("crc32 {}, {}", dn, sn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(dst, src))));
+        }
+    }
+    // crc32 r32, r16
+    for &(dst, dn) in &[(EAX, "eax"), (R8D, "r8d")] {
+        for &(src, sn) in &[(AX, "ax"), (CX, "cx")] {
+            let asm = format!("crc32 {}, {}", dn, sn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(dst, src))));
+        }
+    }
+    // crc32 r32, r32
+    for &(dst, dn) in &[(EAX, "eax"), (R8D, "r8d")] {
+        for &(src, sn) in &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")] {
+            let asm = format!("crc32 {}, {}", dn, sn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(dst, src))));
+        }
+    }
+    // crc32 r64, r8
+    for &(dst, dn) in &[(RAX, "rax"), (R8, "r8")] {
+        for &(src, sn) in &[(AL, "al"), (BL, "bl"), (R8B, "r8b")] {
+            let asm = format!("crc32 {}, {}", dn, sn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(dst, src))));
+        }
+    }
+    // crc32 r64, r64
+    for &(dst, dn) in &[(RAX, "rax"), (R8, "r8")] {
+        for &(src, sn) in &[(RAX, "rax"), (RCX, "rcx"), (R8, "r8")] {
+            let asm = format!("crc32 {}, {}", dn, sn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(dst, src))));
+        }
+    }
+    // crc32 r32, mem8/16/32
+    for &(reg, rn) in &[(EAX, "eax"), (R8D, "r8d")] {
+        for (addr, nasm_mem) in mems8() {
+            let asm = format!("crc32 {}, {}", rn, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(reg, addr))));
+        }
+        for (addr, nasm_mem) in mems16() {
+            let asm = format!("crc32 {}, {}", rn, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(reg, addr))));
+        }
+        for (addr, nasm_mem) in mems32() {
+            let asm = format!("crc32 {}, {}", rn, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(reg, addr))));
+        }
+    }
+    // crc32 r64, mem8/64
+    for &(reg, rn) in &[(RAX, "rax"), (R8, "r8")] {
+        for (addr, nasm_mem) in mems8() {
+            let asm = format!("crc32 {}, {}", rn, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(reg, addr))));
+        }
+        for (addr, nasm_mem) in mems64() {
+            let asm = format!("crc32 {}, {}", rn, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.crc32(reg, addr))));
+        }
+    }
+
+    compare_nasm_batch(&nasm, 64, insns);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // stmxcsr / ldmxcsr
 // ═══════════════════════════════════════════════════════════════════
 

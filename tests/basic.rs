@@ -397,6 +397,53 @@ fn test_push_pop_16bit() {
     assert_eq!(code, [0x66, 0x50, 0x66, 0x58]);
 }
 
+// ── CRC32 ────────────────────────────────────────────────────
+
+#[test]
+fn test_crc32_r32_r8() {
+    // crc32 eax, bl → F2 0F 38 F0 C3
+    let code = assemble(|a| a.crc32(EAX, BL));
+    assert_eq!(code, [0xF2, 0x0F, 0x38, 0xF0, 0xC3]);
+}
+
+#[test]
+fn test_crc32_r32_r16() {
+    // crc32 eax, cx → 66 F2 0F 38 F1 C1
+    let code = assemble(|a| a.crc32(EAX, CX));
+    assert_eq!(code, [0x66, 0xF2, 0x0F, 0x38, 0xF1, 0xC1]);
+}
+
+#[test]
+fn test_crc32_r32_r32() {
+    // crc32 eax, ecx → F2 0F 38 F1 C1
+    let code = assemble(|a| a.crc32(EAX, ECX));
+    assert_eq!(code, [0xF2, 0x0F, 0x38, 0xF1, 0xC1]);
+}
+
+#[test]
+fn test_crc32_r64_r8() {
+    // crc32 rax, bl → F2 48 0F 38 F0 C3
+    let code = assemble(|a| a.crc32(RAX, BL));
+    assert_eq!(code, [0xF2, 0x48, 0x0F, 0x38, 0xF0, 0xC3]);
+}
+
+#[test]
+fn test_crc32_r64_r64() {
+    // crc32 rax, rcx → F2 48 0F 38 F1 C1
+    let code = assemble(|a| a.crc32(RAX, RCX));
+    assert_eq!(code, [0xF2, 0x48, 0x0F, 0x38, 0xF1, 0xC1]);
+}
+
+#[test]
+fn test_crc32_bad_size() {
+    // crc32 r64, r32 should fail
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert!(asm.crc32(RAX, ECX).is_err());
+    // crc32 r64, r16 should fail
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert!(asm.crc32(RAX, CX).is_err());
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn test_jit_execution() {

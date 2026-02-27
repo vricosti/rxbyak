@@ -1469,6 +1469,27 @@ impl CodeAssembler {
             RegMem::Mem(m) => self.buf.op_mr(m, &dst, TypeFlags::T_F3 | TypeFlags::T_0F, 0xBC),
         }
     }
+    /// `crc32 r32/r64, r/m8/16/32/64` — F2 0F 38 F0/F1 /r
+    pub fn crc32(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        let src_bit = src.get_bit();
+        let dst_bit = dst.get_bit();
+        // r32 accepts 8/16/32 source; r64 accepts only 8/64 source
+        if !((dst_bit == 32 && (src_bit == 8 || src_bit == 16 || src_bit == 32))
+            || (dst_bit == 64 && (src_bit == 8 || src_bit == 64)))
+        {
+            return Err(Error::BadSizeOfRegister);
+        }
+        let code = if src_bit == 8 { 0xF0u8 } else { 0xF1u8 };
+        let mut type_ = TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_ALLOW_DIFF_SIZE;
+        if src_bit == 16 {
+            type_ = type_ | TypeFlags::T_66;
+        }
+        match &src {
+            RegMem::Reg(s) => self.buf.op_rr(&dst, s, type_, code),
+            RegMem::Mem(m) => self.buf.op_mr(m, &dst, type_, code),
+        }
+    }
     /// BT - Bit Test: 0F A3 /r
     pub fn bt(&mut self, op: impl Into<RegMem>, src: Reg) -> Result<()> {
         let op = op.into();
