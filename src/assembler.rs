@@ -29,6 +29,18 @@ impl CodeAssembler {
         })
     }
 
+    /// Create an assembler backed by a user-provided buffer.
+    ///
+    /// # Safety
+    /// The buffer must remain valid for the lifetime of this CodeAssembler.
+    /// The caller is responsible for setting memory protection (e.g., RX before execution).
+    pub unsafe fn from_user_buf(buf: *mut u8, size: usize) -> Self {
+        Self {
+            buf: CodeBuffer::from_user_buf(buf, size),
+            label_mgr: LabelManager::new(),
+        }
+    }
+
     // ─── Buffer access ─────────────────────────────────────────
 
     /// Get current code size.
@@ -36,6 +48,12 @@ impl CodeAssembler {
 
     /// Get the generated code as a byte slice.
     pub fn code(&self) -> &[u8] { self.buf.as_slice() }
+
+    /// Reset the code size to zero (for re-generating code in the same buffer).
+    pub fn reset_size(&mut self) { self.buf.reset_size(); }
+
+    /// Get pointer to start of code buffer.
+    pub fn top(&self) -> *const u8 { self.buf.top() }
 
     /// Finalize the code: resolve labels, set memory protection to RX.
     pub fn ready(&mut self) -> Result<()> {
@@ -46,6 +64,22 @@ impl CodeAssembler {
             self.buf.calc_jmp_address()?;
         }
         self.buf.protect_rx()
+    }
+
+    /// Finalize the code for read+execute (resolve labels, set RX protection).
+    /// Same as `ready()` — resolves labels and sets memory protection to RX.
+    pub fn ready_re(&mut self) -> Result<()> {
+        self.ready()
+    }
+
+    /// Set memory protection to Read+Execute.
+    pub fn set_protect_mode_re(&mut self) -> Result<()> {
+        self.buf.protect_rx()
+    }
+
+    /// Set memory protection to Read+Write.
+    pub fn set_protect_mode_rw(&mut self) -> Result<()> {
+        self.buf.protect_rw()
     }
 
     /// Get a typed function pointer to the generated code.
@@ -68,6 +102,23 @@ impl CodeAssembler {
     /// Emit a 64-bit qword.
     pub fn dq(&mut self, v: u64) -> Result<()> { self.buf.dq(v) }
 
+    /// Align the code to a boundary by emitting NOP bytes (0x90).
+    pub fn align(&mut self, n: usize) -> Result<()> {
+        if n == 0 || (n & (n - 1)) != 0 {
+            return Err(Error::BadParameter);
+        }
+        while !self.buf.size().is_multiple_of(n) {
+            self.buf.db(0x90)?;
+        }
+        Ok(())
+    }
+
+    /// Embed an absolute label address (8 bytes) in the code stream.
+    /// Used for building jump tables with absolute addresses.
+    pub fn put_l(&mut self, label: &Label) -> Result<()> {
+        self.put_label(label, 8, false, 0)
+    }
+
     // ─── Label management ──────────────────────────────────────
 
     /// Create a new anonymous label.
@@ -87,6 +138,10 @@ impl CodeAssembler {
         for (patch_offset, disp, size, mode) in patches {
             if is_auto_grow {
                 self.buf.save(patch_offset, disp, size, mode);
+            } else if mode == LabelMode::Abs {
+                // Absolute address: top + label_offset
+                let addr = self.buf.top() as u64 + offset as u64;
+                self.buf.rewrite(patch_offset, addr, size as usize);
             } else {
                 self.buf.rewrite(patch_offset, disp, size as usize);
             }
@@ -114,6 +169,8 @@ impl CodeAssembler {
 
     fn put_label(&mut self, label: &Label, jmp_size: u8, relative: bool, disp: i64) -> Result<()> {
         let id = label.id();
+        let is_auto_grow = self.buf.alloc_mode() == AllocMode::AutoGrow;
+
         if let Some(offset) = self.label_mgr.get_offset(label) {
             if relative {
                 let d = offset as i64 + disp - self.buf.size() as i64 - jmp_size as i64;
@@ -121,26 +178,33 @@ impl CodeAssembler {
                     return Err(Error::OffsetIsTooBig);
                 }
                 self.buf.dd(d as u32)?;
-            } else if self.buf.alloc_mode() == AllocMode::AutoGrow {
-                self.buf.dd(0)?;
-                self.buf.save(self.buf.size() - 4, offset as u64, 4, LabelMode::AddTop);
+            } else if is_auto_grow {
+                // In AutoGrow mode, emit 8 bytes for absolute label addresses
+                // The value will be resolved during calc_jmp_address
+                self.buf.dq(0)?;
+                self.buf.save(self.buf.size() - 8, offset as u64, 8, LabelMode::AddTop);
             } else {
                 let addr = self.buf.top() as u64 + offset as u64;
                 self.buf.dq(addr)?;
             }
         } else {
             // Forward reference
-            self.buf.dd(0)?;
+            if relative {
+                self.buf.dd(0)?;
+            } else {
+                // Both AutoGrow and fixed mode use 8 bytes for absolute addresses
+                self.buf.dq(0)?;
+            }
             let mode = if relative {
                 LabelMode::AsIs
-            } else if self.buf.alloc_mode() == AllocMode::AutoGrow {
+            } else if is_auto_grow {
                 LabelMode::AddTop
             } else {
                 LabelMode::Abs
             };
             self.label_mgr.add_undef(id, JmpLabel {
                 end_of_jmp: self.buf.size(),
-                jmp_size,
+                jmp_size: if relative { jmp_size } else { 8 },
                 mode,
                 disp,
             });
@@ -384,6 +448,24 @@ impl CodeAssembler {
         self.buf.op_mr(&src, &dst, TypeFlags::NONE, 0x8D)
     }
 
+    /// `lea dst, [rip + label]` — Load label address via RIP-relative addressing.
+    ///
+    /// This is equivalent to xbyak's `mov(reg, label)` which generates
+    /// `lea reg, [rip + disp32]` for 64-bit code.
+    pub fn lea_label(&mut self, dst: Reg, label: &Label) -> Result<()> {
+        if !dst.is_bit(64) { return Err(Error::BadCombination); }
+        // Emit: REX.W + 8D /r with RIP-relative ModRM (mod=0, rm=5)
+        // REX.W prefix
+        let rex = 0x48 | if dst.get_idx() >= 8 { 0x04 } else { 0 };
+        self.buf.db(rex)?;
+        // opcode for LEA
+        self.buf.db(0x8D)?;
+        // ModRM: mod=00, reg=dst, rm=101 (RIP-relative)
+        self.buf.db(((dst.get_idx() & 7) << 3) | 5)?;
+        // 32-bit displacement (relative to end of instruction)
+        self.put_label(label, 4, true, 0)
+    }
+
     /// `test dst, src`
     pub fn test(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>) -> Result<()> {
         let dst = dst.into();
@@ -478,8 +560,8 @@ impl CodeAssembler {
     }
 
     /// `jmp reg` — Jump to address in register.
-    pub fn jmp_reg(&mut self, reg: Reg) -> Result<()> {
-        self.buf.op_rext(&RegMem::Reg(reg), 4, TypeFlags::NONE, 0xFE, 0)
+    pub fn jmp_reg(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.buf.op_rext(&op.into(), 4, TypeFlags::NONE, 0xFE, 0)
     }
 
     /// `call label` — Call subroutine.
@@ -489,8 +571,8 @@ impl CodeAssembler {
     }
 
     /// `call reg` — Call address in register.
-    pub fn call_reg(&mut self, reg: Reg) -> Result<()> {
-        self.buf.op_rext(&RegMem::Reg(reg), 2, TypeFlags::NONE, 0xFE, 0)
+    pub fn call_reg(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.buf.op_rext(&op.into(), 2, TypeFlags::NONE, 0xFE, 0)
     }
 
     /// Conditional jump helper.

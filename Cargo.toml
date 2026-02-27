@@ -20,3 +20,45 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(windows)'.dev-dependencies]
 cc = "1"
+
+[[example]]
+name = "stackframe"
+
+[[example]]
+name = "test0"
+
+[[example]]
+name = "bf"
+
+[[example]]
+name = "test_util"
+
+[[example]]
+name = "cputopology"
+
+[[example]]
+name = "profiler"
+
+[[example]]
+name = "memfunc"
+
+[[example]]
+name = "static_buf"
+
+[[example]]
+name = "protect_re"
+
+[[example]]
+name = "jmp_table"
+
+[[example]]
+name = "toyvm"
+
+[[example]]
+name = "quantize"
+
+[[example]]
+name = "calc"
+
+[[example]]
+name = "calc2"
