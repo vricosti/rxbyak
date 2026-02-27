@@ -1,4 +1,4 @@
-rxbyak — Supported x86/x64 Instructions (1430 total)
+rxbyak — Supported x86/x64 Instructions (1432 total)
 =====================================================
 
 Notes:
@@ -560,6 +560,7 @@ psignd
 psignw
 pslld
 pslld_imm
+pslldq
 psllq
 psllq_imm
 psllw
@@ -570,6 +571,7 @@ psraw
 psraw_imm
 psrld
 psrld_imm
+psrldq
 psrlq
 psrlq_imm
 psrlw

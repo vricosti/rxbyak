@@ -444,6 +444,36 @@ fn test_crc32_bad_size() {
     assert!(asm.crc32(RAX, CX).is_err());
 }
 
+// ── PSLLDQ / PSRLDQ ──────────────────────────────────────────
+
+#[test]
+fn test_pslldq() {
+    // pslldq xmm0, 4 → 66 0F 73 F8 04
+    let code = assemble(|a| a.pslldq(XMM0, 4));
+    assert_eq!(code, [0x66, 0x0F, 0x73, 0xF8, 0x04]);
+}
+
+#[test]
+fn test_psrldq() {
+    // psrldq xmm0, 4 → 66 0F 73 D8 04
+    let code = assemble(|a| a.psrldq(XMM0, 4));
+    assert_eq!(code, [0x66, 0x0F, 0x73, 0xD8, 0x04]);
+}
+
+#[test]
+fn test_pslldq_xmm8() {
+    // pslldq xmm8, 1 → 66 41 0F 73 F8 01
+    let code = assemble(|a| a.pslldq(XMM8, 1));
+    assert_eq!(code, [0x66, 0x41, 0x0F, 0x73, 0xF8, 0x01]);
+}
+
+#[test]
+fn test_psrldq_xmm8() {
+    // psrldq xmm8, 1 → 66 41 0F 73 D8 01
+    let code = assemble(|a| a.psrldq(XMM8, 1));
+    assert_eq!(code, [0x66, 0x41, 0x0F, 0x73, 0xD8, 0x01]);
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn test_jit_execution() {

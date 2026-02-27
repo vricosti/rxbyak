@@ -2319,6 +2319,16 @@ impl CodeAssembler {
         self.buf.op_rext(&RegMem::Reg(dst), 4, TypeFlags::T_66 | TypeFlags::T_0F, 0x71, 1)?;
         self.buf.db(imm)
     }
+    /// `pslldq xmm, imm8` — 66 0F 73 /7 ib (shift left by bytes)
+    pub fn pslldq(&mut self, dst: Reg, imm: u8) -> Result<()> {
+        self.buf.op_rext(&RegMem::Reg(dst), 7, TypeFlags::T_66 | TypeFlags::T_0F, 0x73, 1)?;
+        self.buf.db(imm)
+    }
+    /// `psrldq xmm, imm8` — 66 0F 73 /3 ib (shift right by bytes)
+    pub fn psrldq(&mut self, dst: Reg, imm: u8) -> Result<()> {
+        self.buf.op_rext(&RegMem::Reg(dst), 3, TypeFlags::T_66 | TypeFlags::T_0F, 0x73, 1)?;
+        self.buf.db(imm)
+    }
 
     // ═══════════════════════════════════════════════════════════
     // AVX-512 Opmask (k-register) instructions

@@ -621,3 +621,24 @@ fn test_nm_sse_misc() {
 
     compare_nasm_batch(&nasm, 64, insns);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// PSLLDQ / PSRLDQ (byte shifts)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_nm_sse_pslldq_psrldq() {
+    let nasm = skip_if_no_nasm!();
+    let mut insns: Vec<NmPair> = Vec::new();
+
+    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM1, "xmm1"), (XMM8, "xmm8"), (XMM15, "xmm15")] {
+        for imm in [0u8, 1, 8, 15] {
+            let asm = format!("pslldq {}, {}", xn, imm);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.pslldq(xmm, imm))));
+            let asm = format!("psrldq {}, {}", xn, imm);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.psrldq(xmm, imm))));
+        }
+    }
+
+    compare_nasm_batch(&nasm, 64, insns);
+}

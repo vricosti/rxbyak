@@ -101,6 +101,8 @@ const HANDWRITTEN: &[&str] = &[
     // PSLL/PSRL/PSRA immediate shifts (hand-written, suffixed _imm)
     "pslld_imm", "psllq_imm", "psrld_imm", "psrlq_imm", "psrad_imm",
     "psllw_imm", "psrlw_imm", "psraw_imm",
+    // PSLLDQ/PSRLDQ byte shifts (hand-written)
+    "pslldq", "psrldq",
     // Opmask (k-register) instructions (hand-written)
     "kmovw", "kmovb", "kmovd", "kmovq",
     "kandw", "kandb", "kandd", "kandq",
