@@ -1,0 +1,383 @@
+rxbyak vs xbyak — Comprehensive Differences
+==============================================
+
+rxbyak is a Rust port of xbyak (https://github.com/herumi/xbyak), the C++
+x86/x64 JIT assembler. While the encoding logic and instruction coverage are
+faithful to xbyak, the Rust language imposes different idioms for ownership,
+error handling, type safety, and polymorphism.
+
+This document lists every known API and design difference.
+
+
+1. 64-BIT ONLY
+---------------
+xbyak supports both 32-bit (XBYAK32) and 64-bit modes.
+rxbyak is 64-bit only.
+
+Why: 32-bit JIT is rarely needed in modern contexts. Dropping it simplifies
+the entire encoder and avoids carrying two code paths. The following xbyak
+preprocessor defines have no rxbyak equivalent:
+
+  XBYAK32, XBYAK64, XBYAK64_WIN, XBYAK64_GCC,
+  XBYAK_USE_OP_NAMES, XBYAK_ENABLE_OMITTED_OPERAND,
+  XBYAK_UNDEF_JNL, XBYAK_NO_EXCEPTION, XBYAK_USE_MEMFD,
+  XBYAK_OLD_DISP_CHECK
+
+Rust's cfg() attributes replace preprocessor-based feature gating.
+
+
+2. ERROR HANDLING: Result<()> INSTEAD OF EXCEPTIONS
+----------------------------------------------------
+xbyak throws Xbyak::Error exceptions (or uses error codes with
+XBYAK_NO_EXCEPTION). rxbyak uses Rust's Result<T, Error> pattern:
+
+  // xbyak (C++)
+  mov(eax, ecx);                // may throw
+
+  // rxbyak (Rust)
+  asm.mov(EAX, ECX)?;           // ? propagates errors
+
+Every instruction method returns Result<()>. The Error enum has 54 variants
+that map 1:1 from xbyak's error codes.
+
+Why: Rust has no exceptions. Result is idiomatic and forces callers to handle
+errors, eliminating the possibility of silent encoding failures.
+
+
+3. IMMEDIATE TYPES: u8 INSTEAD OF int
+---------------------------------------
+xbyak uses C++ int (32-bit signed) for most immediates, including shift
+counts and imm8 operands. rxbyak uses precise Rust integer types:
+
+  Shift/rotate immediates (shl, shr, sar, rol, ror, rcl, rcr): u8
+  Bit test immediates (bt_imm, bts_imm, btr_imm, btc_imm):     u8
+  SSE/AVX imm8 operands (codegen-generated):                     u8
+  General immediates (mov, add, sub, etc.):                       i64 (via RegMemImm)
+  push_imm:                                                       i32
+  ret_imm:                                                        u16
+  enter:                                                          u16, u8
+
+Why: Rust's strict typing forces explicit choice of integer width. Using u8
+for shift counts and imm8 operands prevents out-of-range values at compile
+time. xbyak's int would silently truncate; rxbyak makes the constraint
+explicit.
+
+
+4. NO FUNCTION OVERLOADING — SUFFIXED METHOD NAMES
+----------------------------------------------------
+C++ allows multiple functions with the same name but different parameter
+types. Rust does not. Where xbyak uses overloading, rxbyak uses distinct
+method names with suffixes:
+
+  xbyak                         rxbyak
+  ─────────────────────────────────────────────────
+  push(reg)                     push(reg)
+  push(imm)                     push_imm(imm)
+  ret()                         ret()
+  ret(imm)                      ret_imm(imm)
+  jmp(label)                    jmp(&label, JmpType)
+  jmp(reg)                      jmp_reg(op)
+  call(label)                   call(&label)
+  call(reg)                     call_reg(op)
+  shl(op, imm)                  shl(op, imm)
+  shl(op, cl)                   shl_cl(op)
+  sar(op, imm)                  sar(op, imm)
+  sar(op, cl)                   sar_cl(op)
+  bt(op, reg)                   bt(op, reg)
+  bt(op, imm)                   bt_imm(op, imm)
+  shld(op, reg, imm)            shld(op, reg, imm)
+  shld(op, reg, cl)             shld_cl(op, reg)
+  pslld(xmm, xmm)              pslld(xmm, xmm)          [SSE register form]
+  pslld(xmm, imm)              pslld_imm(xmm, imm)      [immediate form]
+  movhps(xmm, mem)             movhps_load(xmm, mem)
+  movhps(mem, xmm)             movhps_store(mem, xmm)
+  mov(reg, label)               lea_label(reg, &label)
+
+The Into<RegMem> / Into<RegMemImm> trait bounds provide some overloading
+for operands that differ only in type (Reg vs Address vs i32), but not
+for fundamentally different encodings.
+
+
+5. RUST KEYWORD ESCAPES
+-------------------------
+x86 mnemonics that collide with Rust keywords get an underscore suffix:
+
+  xbyak      rxbyak       Reason
+  ──────────────────────────────────
+  and        and_         Rust keyword
+  or         or_          Rust keyword
+  not        not_         Rust keyword
+  xor        xor_         Rust keyword
+  std        std_         Rust standard library name
+  in         in_          Rust keyword (if ever added)
+  loop       loop_        Rust keyword (if ever added)
+  mod        mod_         Rust keyword (if ever added)
+
+Additionally, movsd (string operation) is renamed to movsd_string() to
+avoid collision with the SSE movsd instruction which keeps the name movsd().
+
+
+6. FLAT Reg STRUCT INSTEAD OF CLASS HIERARCHY
+----------------------------------------------
+xbyak uses a deep C++ class hierarchy:
+  Operand -> Reg -> Reg8/Reg16/Reg32/Reg64 -> Xmm/Ymm/Zmm/Mmx/...
+
+rxbyak replaces it with a single flat struct:
+
+  pub struct Reg {
+      idx: u8,
+      kind: Kind,        // enum: Reg, Xmm, Ymm, Zmm, Mmx, Fpu, Opmask, Tmm, ...
+      bit: u16,          // 8, 16, 32, 64, 128, 256, 512
+      mask: u8,          // EVEX writemask index
+      rounding: Rounding,
+      zero: bool,        // EVEX zeroing
+      nf: bool,          // APX NF
+      zu: bool,          // APX ZU
+  }
+
+Reg derives Clone + Copy, so register values are always cheaply copied
+(no ownership transfer). The kind field + helper methods (is_xmm(),
+is_reg(), etc.) replace virtual dispatch.
+
+Why: Rust has no class inheritance. A flat struct with a kind discriminant
+is idiomatic, avoids dynamic dispatch, and enables Copy semantics.
+
+
+7. REGISTER CONSTANTS: UPPER_CASE
+-----------------------------------
+xbyak defines registers as lowercase global objects:  eax, xmm0, rsp
+rxbyak uses Rust const items in UPPER_CASE:           EAX, XMM0, RSP
+
+  pub const EAX: Reg = Reg::gpr32(0);
+  pub const XMM0: Reg = Reg::xmm(0);
+  pub const RSP: Reg = Reg::gpr64(4);
+
+Why: Rust convention requires UPPER_CASE for const items. The compiler
+warns on lowercase constants.
+
+
+8. EVEX MODIFIERS: METHOD CHAINING INSTEAD OF OPERATOR|
+---------------------------------------------------------
+xbyak uses bitwise OR for EVEX writemask, zeroing, and rounding:
+
+  vaddps(zmm0 | k1 | T_z, zmm1, zmm2);
+  vaddps(zmm0 | k1 | T_rn_sae, zmm1, zmm2);
+
+rxbyak uses method chaining:
+
+  asm.vaddps(ZMM0.k(1).z(), ZMM1, ZMM2)?;
+  asm.vaddps(ZMM0.k(1).rounding(Rounding::RnSae), ZMM1, ZMM2)?;
+
+Modifier methods return a modified copy of the register:
+  .k(mask_idx)              — set writemask
+  .z()                      — enable zeroing
+  .rounding(Rounding::*)    — set rounding mode
+  .nf()                     — APX NF flag
+  .zu()                     — APX ZU flag
+
+Why: Rust's BitOr trait could work but requires a wrapper type for each
+modifier kind. Method chaining is clearer and provides type-safe access.
+
+
+9. MEMORY ADDRESSING: FREE FUNCTIONS INSTEAD OF operator[]
+------------------------------------------------------------
+xbyak uses AddressFrame objects with operator[]:
+
+  mov(eax, dword[rbx + rcx*4 + 8]);
+
+rxbyak uses free functions taking RegExp arguments:
+
+  asm.mov(EAX, dword_ptr(RBX + RCX * 4 + 8))?;
+
+Address expression operators (Add, Sub, Mul on Reg/RegExp) build RegExp
+values, then ptr()/dword_ptr()/qword_ptr()/etc. wrap them into Address.
+
+Note: operator overloads on RegExp panic (via .expect()) on invalid
+addressing, since Rust's Add trait cannot return Result. This is a
+deliberate ergonomics trade-off.
+
+
+10. LABEL API DIFFERENCES
+---------------------------
+xbyak:
+  Label label;
+  jmp(label);            // forward reference, auto-detect jump type
+  L(label);              // define label
+
+rxbyak:
+  let label = asm.create_label();
+  asm.jmp(&label, JmpType::Near)?;    // explicit JmpType required
+  asm.bind(&label)?;                   // bind, not L()
+
+Key differences:
+  - Labels are opaque handles (just a LabelId(u32)), not objects with state.
+    All state is in LabelManager.
+  - Jump type must be explicit: JmpType::Short, JmpType::Near, or
+    JmpType::Auto. xbyak auto-detects by default.
+  - Named labels: xbyak uses L("name"), rxbyak uses asm.named_label("name").
+  - lea_label(reg, &label) replaces xbyak's mov(reg, label) for
+    getting code addresses (generates lea reg, [rip + disp32]).
+
+Why: Rust's ownership model makes it impractical for labels to hold
+back-references to the assembler. Opaque handles avoid lifetime issues.
+
+
+11. STACKFRAME: EXPLICIT close() INSTEAD OF RAII
+--------------------------------------------------
+xbyak uses C++ RAII — the destructor emits the epilogue automatically:
+
+  {
+      StackFrame sf(code, pNum, tNum, stackSize);
+      // ... function body ...
+  }  // destructor emits epilogue
+
+rxbyak requires an explicit close() call:
+
+  let sf = StackFrame::new(&mut asm, 2, 1, 0)?;
+  // ... function body ...
+  sf.close(&mut asm)?;    // consumes sf, emits epilogue
+
+close() takes self by value, preventing double-close at compile time.
+
+Why: Rust's Drop trait cannot borrow &mut CodeAssembler because the
+StackFrame cannot store a mutable reference with the required lifetime.
+Additionally, Drop::drop() cannot return Result, making error propagation
+from the destructor impossible.
+
+
+12. COMPOSITION INSTEAD OF INHERITANCE
+----------------------------------------
+xbyak users inherit from CodeGenerator:
+
+  struct MyCode : Xbyak::CodeGenerator {
+      MyCode() {
+          mov(eax, 42);   // 'this' is the assembler
+          ret();
+      }
+  };
+
+rxbyak always uses an explicit assembler instance:
+
+  let mut asm = CodeAssembler::new(4096)?;
+  asm.mov(EAX, 42)?;
+  asm.ret()?;
+
+Internally, CodeAssembler composes CodeBuffer + LabelManager rather than
+inheriting from a base class.
+
+Why: Rust has no class inheritance. Composition is idiomatic.
+
+
+13. UNSAFE get_code()
+----------------------
+xbyak's getCode<T>() returns a function pointer directly.
+rxbyak marks it unsafe:
+
+  let f: fn(i64, i64) -> i64 = unsafe { asm.get_code() };
+
+Why: Transmuting a byte buffer into a function pointer is inherently
+unsafe. The caller must ensure the generated code matches the declared
+function signature. Rust makes this responsibility explicit.
+
+
+14. ready() COMBINES LABEL RESOLUTION + MEMORY PROTECTION
+-----------------------------------------------------------
+xbyak requires separate calls for finalizing code:
+  setProtectModeRE() or readyRE()
+
+rxbyak combines both into a single ready() call that:
+  1. Checks for undefined labels
+  2. Resolves AutoGrow jump addresses
+  3. Sets memory protection to RX (read+execute)
+
+Finer-grained control is still available via ready_re(),
+set_protect_mode_re(), and set_protect_mode_rw().
+
+
+15. BUILD-TIME CODE GENERATION
+-------------------------------
+xbyak defines all ~1400 instruction methods manually in header files.
+
+rxbyak uses a build-time code generation system (build.rs) that reads
+instruction tables from gen/instructions.rs and gen/avx512.rs, then
+generates method implementations into mnemonics.rs. This eliminates
+thousands of lines of boilerplate.
+
+~280 instructions with complex encoding logic (GPR, jumps, bidirectional
+moves, x87, opmask, AMX) are hand-written in assembler.rs and listed in
+the HANDWRITTEN array to skip code generation.
+
+This approach is unique to rxbyak; xbyak does not use code generation.
+
+
+16. TypeFlags NEWTYPE
+----------------------
+xbyak uses raw integer constants for encoding flags (T_66, T_F2, T_0F, etc.).
+rxbyak wraps them in a newtype struct:
+
+  pub struct TypeFlags(pub u64);
+
+  pub const T_66: Self = Self(1 << 5);
+  pub const T_F2: Self = Self(1 << 6);
+
+The struct implements BitOr, BitAnd, etc. for combining flags.
+Bit positions match xbyak exactly for ease of porting.
+
+Why: A newtype prevents accidentally mixing TypeFlags with raw integers.
+
+
+17. MISSING / NOT PORTED FEATURES
+-----------------------------------
+- 32-bit mode (XBYAK32): Not supported
+- XBYAK_USE_MEMFD: memfd-backed executable memory not implemented
+- XBYAK_ENABLE_OMITTED_OPERAND: VEX 2-op shorthand (dst implied) not
+  supported; all operands must be explicit
+- Custom allocators: xbyak supports custom allocators via template
+  parameter; rxbyak uses the platform module directly
+- cmpsd string operation: Missing (cmpsb/cmpsw/cmpsq exist, but cmpsd
+  string would conflict with SSE cmpsd, like movsd/movsd_string)
+
+
+18. PLATFORM ABSTRACTION
+--------------------------
+xbyak uses #ifdef _WIN32 / __linux__ preprocessor guards.
+rxbyak uses Rust cfg attributes: #[cfg(unix)] and #[cfg(windows)].
+
+Backend implementations:
+  - Unix:    libc::mmap / munmap / mprotect
+  - Windows: VirtualAlloc / VirtualFree / VirtualProtect
+
+Drop on CodeBuffer automatically frees executable memory, but silently
+ignores errors (let _ = ...) since Drop cannot propagate Result.
+
+
+19. REGISTER EQUALITY EXCLUDES EVEX MODIFIERS
+-----------------------------------------------
+Reg's PartialEq compares only idx, kind, and bit — deliberately excluding
+mask, rounding, zero, nf, and zu. This means:
+
+  XMM0.k(1) == XMM0    // true
+
+This matches how xbyak compares base register identity.
+
+
+20. OPERAND POLYMORPHISM VIA Into<> TRAITS
+--------------------------------------------
+xbyak uses C++ implicit conversions to accept Reg, Address, or immediate
+values in the same parameter position.
+
+rxbyak uses enum types with Into<> trait bounds:
+
+  pub enum RegMem { Reg(Reg), Mem(Address) }
+  pub enum RegMemImm { Reg(Reg), Mem(Address), Imm(i64) }
+
+  pub fn mov(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>)
+
+From trait implementations enable automatic conversion:
+  impl From<Reg> for RegMem { ... }
+  impl From<Address> for RegMem { ... }
+  impl From<i32> for RegMemImm { ... }
+
+Why: Rust has no implicit conversions. The Into trait pattern is the
+idiomatic equivalent, providing compile-time safety while keeping the
+API ergonomic.
