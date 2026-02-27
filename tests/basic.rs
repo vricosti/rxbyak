@@ -203,6 +203,41 @@ fn test_shr_rax_1() {
 }
 
 #[test]
+fn test_shl_eax_cl() {
+    // shl eax, cl → D3 E0
+    let code = assemble(|a| a.shl_cl(EAX));
+    assert_eq!(code, [0xD3, 0xE0]);
+}
+
+#[test]
+fn test_shr_rax_cl() {
+    // shr rax, cl → 48 D3 E8
+    let code = assemble(|a| a.shr_cl(RAX));
+    assert_eq!(code, [0x48, 0xD3, 0xE8]);
+}
+
+#[test]
+fn test_sar_ebx_cl() {
+    // sar ebx, cl → D3 FB
+    let code = assemble(|a| a.sar_cl(EBX));
+    assert_eq!(code, [0xD3, 0xFB]);
+}
+
+#[test]
+fn test_rol_ecx_cl() {
+    // rol ecx, cl → D3 C1
+    let code = assemble(|a| a.rol_cl(ECX));
+    assert_eq!(code, [0xD3, 0xC1]);
+}
+
+#[test]
+fn test_ror_rdx_cl() {
+    // ror rdx, cl → 48 D3 CA
+    let code = assemble(|a| a.ror_cl(RDX));
+    assert_eq!(code, [0x48, 0xD3, 0xCA]);
+}
+
+#[test]
 fn test_label_forward_jmp() {
     let code = assemble(|a| {
         let label = a.create_label();

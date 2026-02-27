@@ -577,6 +577,45 @@ fn test_nm_shift() {
         }
     }
 
+    // Shift/rotate by CL register
+    let cl_ops: &[(&str, fn(&mut CodeAssembler, Reg) -> Result<()>)] = &[
+        ("shl", |a, r| a.shl_cl(r)),
+        ("shr", |a, r| a.shr_cl(r)),
+        ("sar", |a, r| a.sar_cl(r)),
+        ("rol", |a, r| a.rol_cl(r)),
+        ("ror", |a, r| a.ror_cl(r)),
+        ("rcl", |a, r| a.rcl_cl(r)),
+        ("rcr", |a, r| a.rcr_cl(r)),
+    ];
+
+    for &(op_name, op_fn) in cl_ops {
+        for &(reg, rn) in regs32 {
+            let asm = format!("{} {}, cl", op_name, rn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| op_fn(a, reg))));
+        }
+        for &(reg, rn) in regs64 {
+            let asm = format!("{} {}, cl", op_name, rn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| op_fn(a, reg))));
+        }
+    }
+
+    // Shift/rotate mem by CL
+    let cl_mem_ops: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>)] = &[
+        ("shl", |a, m| a.shl_cl(m)),
+        ("shr", |a, m| a.shr_cl(m)),
+        ("sar", |a, m| a.sar_cl(m)),
+        ("rol", |a, m| a.rol_cl(m)),
+        ("ror", |a, m| a.ror_cl(m)),
+        ("rcl", |a, m| a.rcl_cl(m)),
+        ("rcr", |a, m| a.rcr_cl(m)),
+    ];
+    for &(op_name, op_fn) in cl_mem_ops {
+        for (addr, nasm_mem) in mems32() {
+            let asm = format!("{} {}, cl", op_name, nasm_mem);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| op_fn(a, addr))));
+        }
+    }
+
     compare_nasm_batch(&nasm, 64, insns);
 }
 

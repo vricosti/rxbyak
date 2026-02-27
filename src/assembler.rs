@@ -758,6 +758,25 @@ impl CodeAssembler {
         Ok(())
     }
 
+    fn shift_op_cl(&mut self, op: RegMem, ext: u8) -> Result<()> {
+        self.buf.op_rext(&op, ext, TypeFlags::T_CODE1_IF1, 0xD2, 0)
+    }
+
+    /// `shl r/m, CL`
+    pub fn shl_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.shift_op_cl(op.into(), 4)
+    }
+
+    /// `shr r/m, CL`
+    pub fn shr_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.shift_op_cl(op.into(), 5)
+    }
+
+    /// `sar r/m, CL`
+    pub fn sar_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.shift_op_cl(op.into(), 7)
+    }
+
     // ─── VEX/EVEX dispatch helpers ──────────────────────────────
 
     /// AVX 3-operand form: (dst, src1, src2) where src2 is reg or mem.
@@ -1503,6 +1522,26 @@ impl CodeAssembler {
     }
     pub fn rcr(&mut self, op: impl Into<RegMem>, count: u8) -> Result<()> {
         self.rotate_op(&op.into(), 3, count)
+    }
+
+    fn rotate_op_cl(&mut self, op: &RegMem, ext: u8) -> Result<()> {
+        self.buf.op_rext(op, ext, TypeFlags::T_CODE1_IF1, 0xD2, 0)
+    }
+    /// `rol r/m, CL`
+    pub fn rol_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.rotate_op_cl(&op.into(), 0)
+    }
+    /// `ror r/m, CL`
+    pub fn ror_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.rotate_op_cl(&op.into(), 1)
+    }
+    /// `rcl r/m, CL`
+    pub fn rcl_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.rotate_op_cl(&op.into(), 2)
+    }
+    /// `rcr r/m, CL`
+    pub fn rcr_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.rotate_op_cl(&op.into(), 3)
     }
 
     // ── Single-operand GPR ────────────────────────────────────
