@@ -1,4 +1,4 @@
-rxbyak — Supported x86/x64 Instructions (1432 total)
+rxbyak — Supported x86/x64 Instructions (1427 total)
 =====================================================
 
 Notes:
@@ -1410,21 +1410,13 @@ kandnw
 kandq
 kandw
 kmovb
-kmovb_from_gpr
 kmovb_store
-kmovb_to_gpr
 kmovd
-kmovd_from_gpr
 kmovd_store
-kmovd_to_gpr
 kmovq
-kmovq_from_gpr
 kmovq_store
-kmovq_to_gpr
 kmovw
-kmovw_from_gpr
 kmovw_store
-kmovw_to_gpr
 knotb
 knotd
 knotq

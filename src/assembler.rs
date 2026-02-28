@@ -2447,16 +2447,6 @@ impl CodeAssembler {
         self.buf.op_vex(&src, None, &RegMem::Mem(addr), TypeFlags::T_0F | TypeFlags::T_W1, 0x91, None)
     }
 
-    // Explicit GPR ↔ k-register aliases (kept for backward compatibility)
-    pub fn kmovw_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovw(dst, src) }
-    pub fn kmovw_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovw(dst, src) }
-    pub fn kmovb_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovb(dst, src) }
-    pub fn kmovb_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovb(dst, src) }
-    pub fn kmovd_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovd(dst, src) }
-    pub fn kmovd_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovd(dst, src) }
-    pub fn kmovq_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovq(dst, src) }
-    pub fn kmovq_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovq(dst, src) }
-
     // ── KAND / KOR / KXOR / KANDN / KXNOR ────────────────────
     // All: VEX.L1.0F.Wx 41-47 /r  (3-op: k, k, k)
     // W0=word, W1(66)=byte, W1(plain)=dword/qword etc.
