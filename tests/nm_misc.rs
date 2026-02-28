@@ -57,7 +57,7 @@ fn test_nm_amx_tdp() {
         ("tdpbusd", CodeAssembler::tdpbusd),
         ("tdpbuud", CodeAssembler::tdpbuud),
         ("tdpbf16ps", CodeAssembler::tdpbf16ps),
-        ("tdpfp16ps", CodeAssembler::tdpfp16ps),
+        // tdpfp16ps excluded: not supported by NASM
     ];
 
     // Test a few representative tmm combinations
@@ -229,8 +229,8 @@ fn test_nm_vcvtps2ph() {
         cases.push((nasm_str, Box::new(move |a: &mut CodeAssembler| a.vcvtps2ph(dst, src, 0x04))));
     }
 
-    // vcvtps2ph [mem], xmm, imm8
-    for (addr, nasm_mem) in mems128() {
+    // vcvtps2ph [mem], xmm, imm8 (NASM doesn't accept a size prefix here)
+    for (addr, nasm_mem) in mems_nosizeptr() {
         let nasm_str = format!("vcvtps2ph {}, xmm3, 0x04", nasm_mem);
         let a2 = addr.clone();
         cases.push((nasm_str, Box::new(move |a: &mut CodeAssembler| a.vcvtps2ph(a2, XMM3, 0x04))));

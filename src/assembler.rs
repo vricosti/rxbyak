@@ -2854,38 +2854,31 @@ impl CodeAssembler {
         self.buf.db(0xC0)
     }
 
-    /// `tilezero tmm` — VEX.128.F2.0F38.W0 49 C0+r
+    /// `tilezero tmm` — VEX.128.F2.0F38.W0 49 /r
     pub fn tilezero(&mut self, dst: Reg) -> Result<()> {
-        self.buf.db(0xC4)?;
-        self.buf.db(0xE2)?;
-        self.buf.db(0x7B)?; // W=0 vvvv=1111 L=0 pp=11(F2)
-        self.buf.db(0x49)?;
-        self.buf.db(0xC0 + dst.get_idx())
+        let tmm0 = Reg::tmm(0);
+        self.buf.op_vex(&dst, Some(&tmm0), &RegMem::Reg(tmm0), TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W0, 0x49, None)
     }
 
     /// Helper for AMX 3-operand tile dot-product instructions
     /// `tdp* dst, src1, src2` — VEX.128.pp.0F38.W0 opcode /r
-    fn amx_tdp(&mut self, dst: Reg, src1: Reg, src2: Reg, pp: u8, code: u8) -> Result<()> {
-        let vvvv = (!src1.get_idx()) & 0x0F;
-        self.buf.db(0xC4)?;
-        self.buf.db(0xE2)?; // R=1 X=1 B=1 map=0F38
-        self.buf.db((vvvv << 3) | pp)?; // W=0 vvvv L=0 pp
-        self.buf.db(code)?;
-        self.buf.set_modrm(3, dst.get_idx(), src2.get_idx())
+    /// xbyak operand order: reg=dst, vvvv=src2, rm=src1
+    fn amx_tdp(&mut self, dst: Reg, src1: Reg, src2: Reg, type_: TypeFlags, code: u8) -> Result<()> {
+        self.buf.op_vex(&dst, Some(&src2), &RegMem::Reg(src1), type_ | TypeFlags::T_0F38 | TypeFlags::T_W0, code, None)
     }
 
     /// `tdpbssd tmm, tmm, tmm` — VEX.128.F2.0F38.W0 5E /r
-    pub fn tdpbssd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, 0x03, 0x5E) }
+    pub fn tdpbssd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, TypeFlags::T_F2, 0x5E) }
     /// `tdpbsud tmm, tmm, tmm` — VEX.128.F3.0F38.W0 5E /r
-    pub fn tdpbsud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, 0x02, 0x5E) }
+    pub fn tdpbsud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, TypeFlags::T_F3, 0x5E) }
     /// `tdpbusd tmm, tmm, tmm` — VEX.128.66.0F38.W0 5E /r
-    pub fn tdpbusd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, 0x01, 0x5E) }
+    pub fn tdpbusd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, TypeFlags::T_66, 0x5E) }
     /// `tdpbuud tmm, tmm, tmm` — VEX.128.NP.0F38.W0 5E /r
-    pub fn tdpbuud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, 0x00, 0x5E) }
+    pub fn tdpbuud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, TypeFlags::NONE, 0x5E) }
     /// `tdpbf16ps tmm, tmm, tmm` — VEX.128.F3.0F38.W0 5C /r
-    pub fn tdpbf16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, 0x02, 0x5C) }
+    pub fn tdpbf16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, TypeFlags::T_F3, 0x5C) }
     /// `tdpfp16ps tmm, tmm, tmm` — VEX.128.F2.0F38.W0 5C /r
-    pub fn tdpfp16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, 0x03, 0x5C) }
+    pub fn tdpfp16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> { self.amx_tdp(dst, src1, src2, TypeFlags::T_F2, 0x5C) }
 
     /// `tileloadd tmm, [base + index*stride]` — VEX.128.F2.0F38.W0 4B /r
     /// Uses SIB-like addressing with base and index*stride.
