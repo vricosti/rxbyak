@@ -2371,21 +2371,54 @@ impl CodeAssembler {
     // kmovd k, k/m32:  VEX.L0.66.0F.W1 90 /r
     // kmovq k, k/m64:  VEX.L0.0F.W1 90 /r
 
-    /// `kmovw k, k/m16` — VEX.L0.0F.W0 90 /r
+    /// Helper for kmov instructions: auto-detects GPR operands and selects
+    /// the correct opcode (0x90 for k↔k/m, 0x92 for k←gpr, 0x93 for gpr←k)
+    /// and prefix (which may differ for the GPR form, e.g. kmovd).
+    fn kmov_dispatch(
+        &mut self, dst: Reg, src: impl Into<RegMem>,
+        km_type: TypeFlags, gpr_type: TypeFlags,
+    ) -> Result<()> {
+        let src = src.into();
+        if dst.is_opmask() {
+            if let RegMem::Reg(r) = &src {
+                if !r.is_opmask() {
+                    // k ← GPR: opcode 0x92
+                    return self.buf.op_vex(&dst, None, &src, gpr_type, 0x92, None);
+                }
+            }
+            // k ← k/m: opcode 0x90
+            self.buf.op_vex(&dst, None, &src, km_type, 0x90, None)
+        } else {
+            // GPR ← k: opcode 0x93
+            self.buf.op_vex(&dst, None, &src, gpr_type, 0x93, None)
+        }
+    }
+
+    /// `kmovw` — VEX.L0.0F.W0 {90,92,93} /r — auto-detects k↔k/m vs GPR forms.
     pub fn kmovw(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
-        self.buf.op_vex(&dst, None, &src.into(), TypeFlags::T_0F | TypeFlags::T_W0, 0x90, None)
+        let t = TypeFlags::T_0F | TypeFlags::T_W0;
+        self.kmov_dispatch(dst, src, t, t)
     }
-    /// `kmovb k, k/m8` — VEX.L0.66.0F.W0 90 /r
+    /// `kmovb` — VEX.L0.66.0F.W0 {90,92,93} /r — auto-detects k↔k/m vs GPR forms.
     pub fn kmovb(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
-        self.buf.op_vex(&dst, None, &src.into(), TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_W0, 0x90, None)
+        let t = TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_W0;
+        self.kmov_dispatch(dst, src, t, t)
     }
-    /// `kmovd k, k/m32` — VEX.L0.66.0F.W1 91 /r (load) or W1 90 /r
+    /// `kmovd` — auto-detects k↔k/m (VEX.66.0F.W1 90) vs GPR (VEX.F2.0F.W0 92/93).
     pub fn kmovd(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
-        self.buf.op_vex(&dst, None, &src.into(), TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_W1, 0x90, None)
+        self.kmov_dispatch(
+            dst, src,
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_W1,
+            TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_W0,
+        )
     }
-    /// `kmovq k, k/m64` — VEX.L0.0F.W1 90 /r
+    /// `kmovq` — auto-detects k↔k/m (VEX.0F.W1 90) vs GPR (VEX.F2.0F.W1 92/93).
     pub fn kmovq(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
-        self.buf.op_vex(&dst, None, &src.into(), TypeFlags::T_0F | TypeFlags::T_W1, 0x90, None)
+        self.kmov_dispatch(
+            dst, src,
+            TypeFlags::T_0F | TypeFlags::T_W1,
+            TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_W1,
+        )
     }
 
     // Store forms: kmov m, k
@@ -2406,39 +2439,15 @@ impl CodeAssembler {
         self.buf.op_vex(&src, None, &RegMem::Mem(addr), TypeFlags::T_0F | TypeFlags::T_W1, 0x91, None)
     }
 
-    // GPR ↔ k-register forms
-    /// `kmovw k, r32` — VEX.L0.0F.W0 92 /r
-    pub fn kmovw_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_0F | TypeFlags::T_W0, 0x92, None)
-    }
-    /// `kmovw r32, k` — VEX.L0.0F.W0 93 /r
-    pub fn kmovw_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_0F | TypeFlags::T_W0, 0x93, None)
-    }
-    /// `kmovb k, r32` — VEX.L0.66.0F.W0 92 /r
-    pub fn kmovb_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_W0, 0x92, None)
-    }
-    /// `kmovb r32, k` — VEX.L0.66.0F.W0 93 /r
-    pub fn kmovb_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_W0, 0x93, None)
-    }
-    /// `kmovd k, r32` — VEX.L0.F2.0F.W0 92 /r
-    pub fn kmovd_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_W0, 0x92, None)
-    }
-    /// `kmovd r32, k` — VEX.L0.F2.0F.W0 93 /r
-    pub fn kmovd_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_W0, 0x93, None)
-    }
-    /// `kmovq k, r64` — VEX.L0.F2.0F.W1 92 /r
-    pub fn kmovq_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_W1, 0x92, None)
-    }
-    /// `kmovq r64, k` — VEX.L0.F2.0F.W1 93 /r
-    pub fn kmovq_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        self.buf.op_vex(&dst, None, &RegMem::Reg(src), TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_W1, 0x93, None)
-    }
+    // Explicit GPR ↔ k-register aliases (kept for backward compatibility)
+    pub fn kmovw_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovw(dst, src) }
+    pub fn kmovw_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovw(dst, src) }
+    pub fn kmovb_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovb(dst, src) }
+    pub fn kmovb_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovb(dst, src) }
+    pub fn kmovd_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovd(dst, src) }
+    pub fn kmovd_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovd(dst, src) }
+    pub fn kmovq_from_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovq(dst, src) }
+    pub fn kmovq_to_gpr(&mut self, dst: Reg, src: Reg) -> Result<()> { self.kmovq(dst, src) }
 
     // ── KAND / KOR / KXOR / KANDN / KXNOR ────────────────────
     // All: VEX.L1.0F.Wx 41-47 /r  (3-op: k, k, k)
