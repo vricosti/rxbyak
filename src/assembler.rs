@@ -52,6 +52,15 @@ impl CodeAssembler {
     /// Reset the code size to zero (for re-generating code in the same buffer).
     pub fn reset_size(&mut self) { self.buf.reset_size(); }
 
+    /// Set the code size to a specific value.
+    ///
+    /// Used to reset the code pointer back to after the prelude when clearing
+    /// the block cache while preserving the dispatcher stubs.
+    pub fn set_size(&mut self, size: usize) { self.buf.set_size(size); }
+
+    /// Get buffer capacity.
+    pub fn capacity(&self) -> usize { self.buf.capacity() }
+
     /// Get pointer to start of code buffer.
     pub fn top(&self) -> *const u8 { self.buf.top() }
 
