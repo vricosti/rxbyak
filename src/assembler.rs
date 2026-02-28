@@ -1128,11 +1128,19 @@ impl CodeAssembler {
         let dst = dst.into();
         let src = src.into();
         match (&dst, &src) {
-            // movq xmm, xmm/m64
+            // movq xmm, r64 — 66 REX.W 0F 6E /r
+            (RegMem::Reg(d), RegMem::Reg(s)) if d.is_xmm() && s.is_reg_bit(64) => {
+                self.buf.op_sse(d, &src, TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE, 0x6E, None)
+            }
+            // movq xmm, xmm/m64 — F3 0F 7E /r
             (RegMem::Reg(d), _) if d.is_xmm() => {
                 self.buf.op_sse(d, &src, TypeFlags::T_F3 | TypeFlags::T_0F, 0x7E, None)
             }
-            // movq m64, xmm
+            // movq r64, xmm — 66 REX.W 0F 7E /r
+            (RegMem::Reg(d), RegMem::Reg(s)) if d.is_reg_bit(64) && s.is_xmm() => {
+                self.buf.op_rr(s, d, TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE, 0x7E)
+            }
+            // movq m64, xmm — 66 0F D6 /r
             (RegMem::Mem(m), RegMem::Reg(s)) if s.is_xmm() => {
                 self.buf.op_mr(m, s, TypeFlags::T_66 | TypeFlags::T_0F, 0xD6)
             }
