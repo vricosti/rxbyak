@@ -273,7 +273,7 @@ impl CodeBuffer {
         x: bool,
     ) -> Result<()> {
         let w = if type_.contains(TypeFlags::T_W1) { 1u8 } else { 0 };
-        let is256 = type_.contains(TypeFlags::T_L1) || reg.is_ymm();
+        let is256 = type_.contains(TypeFlags::T_L1) || reg.is_ymm() || base.is_ymm();
         let r = reg.is_ext_idx();
         let b = base.is_ext_idx();
         let idx = v.map_or(0, |v| v.get_idx());
