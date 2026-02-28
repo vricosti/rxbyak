@@ -2574,6 +2574,7 @@ impl CodeAssembler {
     /// Helper: x87 memory op with extension digit
     fn fpu_mem(&mut self, escape: u8, ext: u8, addr: &Address) -> Result<()> {
         let r = Reg::new(ext, crate::operand::Kind::Reg, 32);
+        self.buf.emit_rex_for_reg_mem(&r, addr, TypeFlags::NONE)?;
         self.buf.db(escape)?;
         self.buf.emit_addr(addr, r.get_idx())
     }
