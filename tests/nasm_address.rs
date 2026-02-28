@@ -86,7 +86,8 @@ fn test_nasm_addr_base_disp_boundaries() {
         (RAX, "rax"), (RBP, "rbp"), (RSP, "rsp"), (R13, "r13"), (R12, "r12"),
     ] {
         for &(disp, disp_str) in disps {
-            let asm_text = format!("mov ecx, dword [{}{}]", base_name, disp_str);
+            let sep = if disp >= 0 { "+" } else { "" };
+            let asm_text = format!("mov ecx, dword [{}{}{}]", base_name, sep, disp_str);
             insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
                 a.mov(ECX, dword_ptr(base + disp))
             })));
