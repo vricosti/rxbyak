@@ -690,6 +690,33 @@ fn test_nm_xchg() {
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.xchg(dst, src))));
     }
 
+    // xchg reg32, mem32 and xchg mem32, reg32
+    let regs32: &[(Reg, &str)] = &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")];
+    for &(reg, rn) in regs32 {
+        for (addr, nasm_mem) in mems32() {
+            let asm = format!("xchg {}, {}", nasm_mem, rn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.xchg(addr, reg))));
+        }
+    }
+
+    // xchg reg64, mem64 and xchg mem64, reg64
+    let regs64: &[(Reg, &str)] = &[(RAX, "rax"), (RCX, "rcx"), (R8, "r8")];
+    for &(reg, rn) in regs64 {
+        for (addr, nasm_mem) in mems64() {
+            let asm = format!("xchg {}, {}", nasm_mem, rn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.xchg(addr, reg))));
+        }
+    }
+
+    // xchg reg8, mem8
+    let regs8: &[(Reg, &str)] = &[(AL, "al"), (CL, "cl"), (R8B, "r8b")];
+    for &(reg, rn) in regs8 {
+        for (addr, nasm_mem) in mems8() {
+            let asm = format!("xchg {}, {}", nasm_mem, rn);
+            insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.xchg(addr, reg))));
+        }
+    }
+
     compare_nasm_batch(&nasm, 64, insns);
 }
 

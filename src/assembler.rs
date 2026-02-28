@@ -647,20 +647,42 @@ impl CodeAssembler {
         self.buf.db(0xCC)
     }
 
-    /// `xchg dst, src` — Exchange register values.
-    pub fn xchg(&mut self, dst: Reg, src: Reg) -> Result<()> {
-        if dst.get_bit() != src.get_bit() {
+    /// `xchg op1, op2` — Exchange values. At most one operand may be memory.
+    pub fn xchg(&mut self, op1: impl Into<RegMem>, op2: impl Into<RegMem>) -> Result<()> {
+        let op1 = op1.into();
+        let op2 = op2.into();
+        // Normalize: ensure p1 is always the register.
+        // Swap if p1 is memory, or if p2 is a non-8-bit register with idx=0 (eax/rax).
+        let (p1, p2) = if op1.is_mem()
+            || (op2.is_reg() && !op2.as_reg().unwrap().is_bit(8) && op2.as_reg().unwrap().get_idx() == 0)
+        {
+            (op2, op1)
+        } else {
+            (op1, op2)
+        };
+        // After normalization, p1 must be a register (mem-mem is invalid).
+        let r1 = match p1 {
+            RegMem::Reg(r) => r,
+            RegMem::Mem(_) => return Err(Error::BadCombination),
+        };
+        // Size check
+        if r1.get_bit() != p2.get_bit() {
             return Err(Error::BadSizeOfRegister);
         }
-        // Short form: xchg eax, reg or xchg reg, eax
-        if !dst.is_bit(8) && (dst.get_idx() == 0 || src.get_idx() == 0) {
-            let (reg, _) = if dst.get_idx() == 0 { (src, dst) } else { (dst, src) };
-            let default = Reg::default();
-            self.buf.emit_rex_for_reg_reg(&reg, &default, TypeFlags::NONE)?;
-            self.buf.db(0x90 | (reg.get_idx() & 7))
-        } else {
-            let code = if dst.is_bit(8) { 0x86u8 } else { 0x87u8 };
-            self.buf.op_rr(&dst, &src, TypeFlags::NONE, code)
+        // Short form (0x90+reg): both registers, p1 idx=0, not 8-bit,
+        // and NOT xchg eax,eax (which would encode as NOP 0x90 in 64-bit mode).
+        if let RegMem::Reg(r2) = &p2 {
+            if r1.get_idx() == 0 && !r1.is_bit(8) && (r2.get_idx() != 0 || !r1.is_bit(32)) {
+                let default = Reg::default();
+                self.buf.emit_rex_for_reg_reg(r2, &default, TypeFlags::NONE)?;
+                return self.buf.db(0x90 | (r2.get_idx() & 7));
+            }
+        }
+        // General form: 0x86 for 8-bit, 0x87 for 16/32/64-bit
+        let code = if r1.is_bit(8) { 0x86u8 } else { 0x87u8 };
+        match p2 {
+            RegMem::Reg(r2) => self.buf.op_rr(&r1, &r2, TypeFlags::NONE, code),
+            RegMem::Mem(m) => self.buf.op_mr(&m, &r1, TypeFlags::NONE, code),
         }
     }
 

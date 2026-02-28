@@ -474,6 +474,36 @@ fn test_psrldq_xmm8() {
     assert_eq!(code, [0x66, 0x41, 0x0F, 0x73, 0xD8, 0x01]);
 }
 
+// ─── xchg with memory operands ───────────────────────────────────
+
+#[test]
+fn test_xchg_mem_eax() {
+    // xchg dword [rcx], eax → 87 01
+    let code = assemble(|a| a.xchg(dword_ptr(RCX.into()), EAX));
+    assert_eq!(code, [0x87, 0x01]);
+}
+
+#[test]
+fn test_xchg_eax_mem() {
+    // xchg eax, dword [rcx] → same encoding as xchg [rcx], eax
+    let code = assemble(|a| a.xchg(EAX, dword_ptr(RCX.into())));
+    assert_eq!(code, [0x87, 0x01]);
+}
+
+#[test]
+fn test_xchg_mem_byte() {
+    // xchg byte [rax], cl → 86 08
+    let code = assemble(|a| a.xchg(byte_ptr(RAX.into()), CL));
+    assert_eq!(code, [0x86, 0x08]);
+}
+
+#[test]
+fn test_xchg_mem_r64() {
+    // xchg qword [rcx], rax → 48 87 01
+    let code = assemble(|a| a.xchg(qword_ptr(RCX.into()), RAX));
+    assert_eq!(code, [0x48, 0x87, 0x01]);
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn test_jit_execution() {
