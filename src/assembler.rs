@@ -1627,8 +1627,15 @@ impl CodeAssembler {
 
     // ── Single-operand GPR ────────────────────────────────────
     /// MUL: F6 /4 (8-bit), F7 /4 (16/32/64)
+    /// Single-operand unsigned multiply: RDX:RAX = RAX * op
     pub fn mul(&mut self, op: impl Into<RegMem>) -> Result<()> {
         self.buf.op_rext(&op.into(), 4, TypeFlags::T_CODE1_IF1, 0xF6, 0)
+    }
+    /// IMUL (1-operand form): F6 /5 (8-bit), F7 /5 (16/32/64)
+    /// Single-operand signed multiply: RDX:RAX = RAX * op (signed)
+    /// Upstream xbyak: imul(const Operand& op) { opRext(op, 0, 5, T_CODE1_IF1, 0xF6); }
+    pub fn imul_1op(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.buf.op_rext(&op.into(), 5, TypeFlags::T_CODE1_IF1, 0xF6, 0)
     }
     /// DIV: F6 /6 (8-bit), F7 /6 (16/32/64)
     pub fn div(&mut self, op: impl Into<RegMem>) -> Result<()> {
