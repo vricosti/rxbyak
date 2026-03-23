@@ -23,6 +23,11 @@ pub struct RegExp {
     pub(crate) disp: i64,
     pub(crate) label_id: Option<LabelId>,
     pub(crate) rip: bool,
+    /// When true with rip=true, disp holds an absolute target address.
+    /// The encoder computes the RIP-relative displacement at emit time:
+    ///   disp32 = target - (current_emit_pos + 4 + imm_size)
+    /// Matches Xbyak's `RegRip::isAddr_` used by `code.rip + void_ptr`.
+    pub(crate) is_addr: bool,
 }
 
 impl Default for RegExp {
@@ -34,6 +39,7 @@ impl Default for RegExp {
             disp: 0,
             label_id: None,
             rip: false,
+            is_addr: false,
         }
     }
 }
@@ -75,9 +81,16 @@ impl RegExp {
         Ok(exp)
     }
 
-    /// Create a RIP-relative RegExp.
+    /// Create a RIP-relative RegExp with raw displacement.
     pub fn rip() -> Self {
         Self { rip: true, ..Default::default() }
+    }
+
+    /// Create a RIP-relative RegExp with an absolute target address.
+    /// The encoder computes `disp32 = addr - (emit_pos + 4 + imm_size)`
+    /// at emit time, matching Xbyak's `code.rip + void_ptr` (isAddr_=true).
+    pub fn rip_addr(addr: i64) -> Self {
+        Self { rip: true, is_addr: true, disp: addr, ..Default::default() }
     }
 
     /// Whether this expression uses VSIB addressing.
@@ -288,7 +301,7 @@ impl Address {
     /// Create a new Address from a RegExp with size hint and broadcast flag.
     pub fn new(bit: u16, broadcast: bool, exp: RegExp) -> Result<Self> {
         let mode = if exp.rip {
-            if exp.label_id.is_some() {
+            if exp.label_id.is_some() || exp.is_addr {
                 AddressMode::RipAddr
             } else {
                 AddressMode::Rip
