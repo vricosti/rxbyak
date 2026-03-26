@@ -2,11 +2,14 @@ use crate::error::{Error, Result};
 use super::ProtectMode;
 
 pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
+    // Allocate as RWX matching upstream dynarmic behavior when
+    // DYNARMIC_ENABLE_NO_EXECUTE_SUPPORT is OFF (the default).
+    // This eliminates all mprotect toggles during JIT compilation.
     let ptr = unsafe {
         libc::mmap(
             core::ptr::null_mut(),
             size,
-            libc::PROT_READ | libc::PROT_WRITE,
+            libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
             libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
             -1,
             0,
