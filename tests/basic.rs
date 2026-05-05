@@ -504,6 +504,33 @@ fn test_xchg_mem_r64() {
     assert_eq!(code, [0x48, 0x87, 0x01]);
 }
 
+// ── CMPXCHG8B / CMPXCHG16B ────────────────────────────────────────────
+
+#[test]
+fn test_cmpxchg8b_mem_rax() {
+    // cmpxchg8b qword [rax] → 0F C7 08
+    //   no REX needed; ModRM = 0x08 (mod=00, reg=001 = /1 ext, r/m=000 = rax)
+    let code = assemble(|a| a.cmpxchg8b(qword_ptr(RAX.into())));
+    assert_eq!(code, [0x0F, 0xC7, 0x08]);
+}
+
+#[test]
+fn test_cmpxchg16b_mem_rax() {
+    // cmpxchg16b oword [rax] → 48 0F C7 08
+    //   REX.W (0x48), 0F C7, ModRM = 0x08
+    let code = assemble(|a| a.cmpxchg16b(xmmword_ptr(RAX.into())));
+    assert_eq!(code, [0x48, 0x0F, 0xC7, 0x08]);
+}
+
+#[test]
+fn test_cmpxchg16b_mem_r13() {
+    // cmpxchg16b oword [r13] → 49 0F C7 4D 00
+    //   REX.W+B (0x49), 0F C7, ModRM = 0x4D (mod=01 disp8, reg=001, r/m=101 = r13),
+    //   disp8 = 0x00 (RBP/R13 base requires explicit displacement, so mod=01 + disp8=0).
+    let code = assemble(|a| a.cmpxchg16b(xmmword_ptr(R13.into())));
+    assert_eq!(code, [0x49, 0x0F, 0xC7, 0x4D, 0x00]);
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn test_jit_execution() {

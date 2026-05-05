@@ -1728,6 +1728,34 @@ impl CodeAssembler {
             RegMem::Mem(m) => self.buf.op_mr(m, &src, TypeFlags::T_0F, code),
         }
     }
+
+    /// CMPXCHG8B: 0F C7 /1 [m64]  — atomic 8-byte compare-and-swap.
+    /// Compares EDX:EAX against the 8-byte memory operand; on equal,
+    /// stores ECX:EBX → memory; otherwise loads memory → EDX:EAX.
+    /// Mirrors xbyak's `void cmpxchg8b(const Address& addr) { opMR(addr, Reg32(1), T_0F, 0xC7); }`.
+    pub fn cmpxchg8b(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::new(1, crate::operand::Kind::Reg, 32),
+            TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+
+    /// CMPXCHG16B: REX.W 0F C7 /1 [m128] — atomic 16-byte compare-and-swap.
+    /// Compares RDX:RAX against the 16-byte memory operand; on equal,
+    /// stores RCX:RBX → memory; otherwise loads memory → RDX:RAX.
+    /// Required by upstream dynarmic's `EmitReadMemoryMov<128>` /
+    /// `EmitWriteMemoryMov<128>` ordered (atomic) paths.
+    /// Mirrors xbyak's `void cmpxchg16b(const Address& addr) { opMR(addr, Reg64(1), T_0F, 0xC7); }`.
+    pub fn cmpxchg16b(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::new(1, crate::operand::Kind::Reg, 64),
+            TypeFlags::T_0F,
+            0xC7,
+        )
+    }
     /// XADD: 0F C0/C1 /r
     pub fn xadd(&mut self, op: impl Into<RegMem>, src: Reg) -> Result<()> {
         let code = if src.get_bit() == 8 { 0xC0u8 } else { 0xC1u8 };
