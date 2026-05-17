@@ -174,7 +174,10 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
-        Parser { input: input.as_bytes(), pos: 0 }
+        Parser {
+            input: input.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn skip_ws(&mut self) {
@@ -201,7 +204,9 @@ impl<'a> Parser<'a> {
         {
             self.pos += 1;
         }
-        if self.pos == start { return None; }
+        if self.pos == start {
+            return None;
+        }
         let s = std::str::from_utf8(&self.input[start..self.pos]).ok()?;
         s.parse().ok()
     }
@@ -209,7 +214,9 @@ impl<'a> Parser<'a> {
     fn parse_factor_vm(&mut self, vm: &mut Vm) -> Result<()> {
         if self.consume(b'(') {
             self.parse_expr_vm(vm)?;
-            if !self.consume(b')') { return Err(Error::BadParameter); }
+            if !self.consume(b')') {
+                return Err(Error::BadParameter);
+            }
             return Ok(());
         }
         if self.consume(b'-') {
@@ -271,7 +278,9 @@ impl<'a> Parser<'a> {
     fn parse_factor_jit(&mut self, jit: &mut Jit) -> Result<()> {
         if self.consume(b'(') {
             self.parse_expr_jit(jit)?;
-            if !self.consume(b')') { return Err(Error::BadParameter); }
+            if !self.consume(b')') {
+                return Err(Error::BadParameter);
+            }
             return Ok(());
         }
         if self.consume(b'-') {

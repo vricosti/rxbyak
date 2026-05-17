@@ -1,8 +1,8 @@
 //! Port of xbyak sample/stackframe.cpp
 //! Demonstrates StackFrame for automatic prologue/epilogue generation.
 
-use rxbyak::*;
 use rxbyak::util::stack_frame::StackFrame;
+use rxbyak::*;
 
 fn main() -> Result<()> {
     // Test 1: 3 params, 0 temps

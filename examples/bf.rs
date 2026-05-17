@@ -41,9 +41,9 @@ fn compile_bf(src: &[u8]) -> Result<CodeAssembler> {
     asm.push(RBX)?;
     asm.push(RBP)?;
     asm.push(R12)?;
-    asm.mov(p_putchar, RDI)?;    // putchar
-    asm.mov(p_getchar, RSI)?;    // getchar
-    asm.mov(stack, RDX)?;        // stack
+    asm.mov(p_putchar, RDI)?; // putchar
+    asm.mov(p_getchar, RSI)?; // getchar
+    asm.mov(stack, RDX)?; // stack
 
     let mut label_f: Vec<Label> = Vec::new();
     let mut label_b: Vec<Label> = Vec::new();
@@ -124,11 +124,7 @@ fn main() -> Result<()> {
     let f: BfFunc = unsafe { asm.get_code() };
 
     let mut stack = vec![0u8; 128 * 1024];
-    f(
-        bf_putchar as usize,
-        bf_getchar as usize,
-        stack.as_mut_ptr(),
-    );
+    f(bf_putchar as usize, bf_getchar as usize, stack.as_mut_ptr());
     println!();
 
     Ok(())

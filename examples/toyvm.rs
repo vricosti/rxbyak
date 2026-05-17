@@ -6,12 +6,23 @@ use std::time::Instant;
 
 #[derive(Clone, Copy, PartialEq)]
 #[repr(u8)]
-enum VmReg { A = 0, B = 1 }
+enum VmReg {
+    A = 0,
+    B = 1,
+}
 
 #[derive(Clone, Copy, PartialEq)]
 #[repr(u8)]
 enum Op {
-    Ld = 0, Ldi, St, Add, Addi, Sub, Subi, Put, Jnz,
+    Ld = 0,
+    Ldi,
+    St,
+    Add,
+    Addi,
+    Sub,
+    Subi,
+    Put,
+    Jnz,
 }
 
 struct ToyVm {
@@ -41,18 +52,38 @@ impl ToyVm {
         (op, r, imm)
     }
 
-    fn vldi(&mut self, r: VmReg, imm: u16) { self.encode(Op::Ldi, r, imm); }
-    fn vld(&mut self, r: VmReg, idx: u16) { self.encode(Op::Ld, r, idx); }
-    fn vst(&mut self, r: VmReg, idx: u16) { self.encode(Op::St, r, idx); }
-    fn vadd(&mut self, r: VmReg, idx: u16) { self.encode(Op::Add, r, idx); }
+    fn vldi(&mut self, r: VmReg, imm: u16) {
+        self.encode(Op::Ldi, r, imm);
+    }
+    fn vld(&mut self, r: VmReg, idx: u16) {
+        self.encode(Op::Ld, r, idx);
+    }
+    fn vst(&mut self, r: VmReg, idx: u16) {
+        self.encode(Op::St, r, idx);
+    }
+    fn vadd(&mut self, r: VmReg, idx: u16) {
+        self.encode(Op::Add, r, idx);
+    }
     #[allow(dead_code)]
-    fn vaddi(&mut self, r: VmReg, imm: u16) { self.encode(Op::Addi, r, imm); }
+    fn vaddi(&mut self, r: VmReg, imm: u16) {
+        self.encode(Op::Addi, r, imm);
+    }
     #[allow(dead_code)]
-    fn vsub(&mut self, r: VmReg, idx: u16) { self.encode(Op::Sub, r, idx); }
-    fn vsubi(&mut self, r: VmReg, imm: u16) { self.encode(Op::Subi, r, imm); }
-    fn vput(&mut self, r: VmReg) { self.encode(Op::Put, r, 0); }
-    fn vjnz(&mut self, r: VmReg, offset: i16) { self.encode(Op::Jnz, r, offset as u16); }
-    fn set_mark(&mut self) { self.mark = self.code.len() as i32; }
+    fn vsub(&mut self, r: VmReg, idx: u16) {
+        self.encode(Op::Sub, r, idx);
+    }
+    fn vsubi(&mut self, r: VmReg, imm: u16) {
+        self.encode(Op::Subi, r, imm);
+    }
+    fn vput(&mut self, r: VmReg) {
+        self.encode(Op::Put, r, 0);
+    }
+    fn vjnz(&mut self, r: VmReg, offset: i16) {
+        self.encode(Op::Jnz, r, offset as u16);
+    }
+    fn set_mark(&mut self) {
+        self.mark = self.code.len() as i32;
+    }
     fn get_mark_offset(&self) -> i16 {
         (self.mark - self.code.len() as i32 - 1) as i16
     }
@@ -76,7 +107,12 @@ impl ToyVm {
                 x if x == Op::Sub as u32 => reg[r] = reg[r].wrapping_sub(self.mem[imm as usize]),
                 x if x == Op::Subi as u32 => reg[r] = reg[r].wrapping_sub(imm as u32),
                 x if x == Op::Put as u32 => {
-                    println!("{} {:>8}(0x{:08x})", (b'A' + r as u8) as char, reg[r], reg[r]);
+                    println!(
+                        "{} {:>8}(0x{:08x})",
+                        (b'A' + r as u8) as char,
+                        reg[r],
+                        reg[r]
+                    );
                 }
                 x if x == Op::Jnz as u32 => {
                     if reg[r] != 0 {
@@ -86,7 +122,9 @@ impl ToyVm {
                 _ => panic!("unknown opcode {}", op),
             }
             pc += 1;
-            if pc >= end { break; }
+            if pc >= end {
+                break;
+            }
         }
     }
 
@@ -239,7 +277,9 @@ fn fib_native(n: u32) -> u32 {
         c = c.wrapping_add(p);
         p = t;
         n -= 1;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
     }
     c
 }
@@ -251,18 +291,18 @@ fn main() -> Result<()> {
     // Fibonacci program:
     // A = c, B = temporary
     // mem[0] = p, mem[1] = t, mem[2] = n
-    fib.vldi(VmReg::A, 1);      // c = 1
-    fib.vst(VmReg::A, 0);       // p = 1
+    fib.vldi(VmReg::A, 1); // c = 1
+    fib.vst(VmReg::A, 0); // p = 1
     fib.vldi(VmReg::B, n);
-    fib.vst(VmReg::B, 2);       // n
+    fib.vst(VmReg::B, 2); // n
     fib.set_mark();
-    fib.vst(VmReg::A, 1);       // t = c
-    fib.vadd(VmReg::A, 0);      // c += p
+    fib.vst(VmReg::A, 1); // t = c
+    fib.vadd(VmReg::A, 0); // c += p
     fib.vld(VmReg::B, 1);
-    fib.vst(VmReg::B, 0);       // p = t
+    fib.vst(VmReg::B, 0); // p = t
     fib.vld(VmReg::B, 2);
     fib.vsubi(VmReg::B, 1);
-    fib.vst(VmReg::B, 2);       // n--
+    fib.vst(VmReg::B, 2); // n--
     fib.vjnz(VmReg::B, fib.get_mark_offset());
     fib.vput(VmReg::A);
 

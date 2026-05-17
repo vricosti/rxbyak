@@ -45,21 +45,30 @@ fn main() {
         let ext_model = (eax1 >> 16) & 0xF;
         let ext_family = (eax1 >> 20) & 0xFF;
 
-        let display_family = if family == 0xF { family + ext_family } else { family };
+        let display_family = if family == 0xF {
+            family + ext_family
+        } else {
+            family
+        };
         let display_model = if family == 0x6 || family == 0xF {
             (ext_model << 4) + model
         } else {
             model
         };
 
-        println!("Family: 0x{:X}, Model: 0x{:X}, Stepping: {}", display_family, display_model, stepping);
+        println!(
+            "Family: 0x{:X}, Model: 0x{:X}, Stepping: {}",
+            display_family, display_model, stepping
+        );
 
         // Get cache info via CPUID function 4 (Intel)
         println!("\nCache hierarchy:");
         for idx in 0..8u32 {
             let (eax4, ebx4, ecx4, _) = cpuid(4, idx);
             let cache_type = eax4 & 0x1F;
-            if cache_type == 0 { break; }
+            if cache_type == 0 {
+                break;
+            }
 
             let level = (eax4 >> 5) & 0x7;
             let line_size = (ebx4 & 0xFFF) + 1;
@@ -76,11 +85,23 @@ fn main() {
             };
 
             if size >= 1024 * 1024 {
-                println!("  L{} {} Cache: {:.1} MB, {}-way, {} byte line",
-                    level, type_str, size as f64 / (1024.0 * 1024.0), ways, line_size);
+                println!(
+                    "  L{} {} Cache: {:.1} MB, {}-way, {} byte line",
+                    level,
+                    type_str,
+                    size as f64 / (1024.0 * 1024.0),
+                    ways,
+                    line_size
+                );
             } else {
-                println!("  L{} {} Cache: {} KB, {}-way, {} byte line",
-                    level, type_str, size / 1024, ways, line_size);
+                println!(
+                    "  L{} {} Cache: {} KB, {}-way, {} byte line",
+                    level,
+                    type_str,
+                    size / 1024,
+                    ways,
+                    line_size
+                );
             }
         }
 

@@ -309,7 +309,10 @@ fn test_jz_forward() {
     // jz near     → 0F 84 01 00 00 00
     // nop         → 90
     // ret         → C3
-    assert_eq!(code, [0x83, 0xF8, 0x00, 0x0F, 0x84, 0x01, 0x00, 0x00, 0x00, 0x90, 0xC3]);
+    assert_eq!(
+        code,
+        [0x83, 0xF8, 0x00, 0x0F, 0x84, 0x01, 0x00, 0x00, 0x00, 0x90, 0xC3]
+    );
 }
 
 #[test]
@@ -366,9 +369,9 @@ fn test_not_eax() {
 #[test]
 fn test_or_and_xor() {
     let code = assemble(|a| {
-        a.or_(EAX, ECX)?;    // 09 C8
-        a.and_(EAX, ECX)?;   // 21 C8
-        a.xor_(EAX, ECX)     // 31 C8
+        a.or_(EAX, ECX)?; // 09 C8
+        a.and_(EAX, ECX)?; // 21 C8
+        a.xor_(EAX, ECX) // 31 C8
     });
     assert_eq!(code, [0x09, 0xC8, 0x21, 0xC8, 0x31, 0xC8]);
 }

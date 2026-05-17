@@ -52,34 +52,93 @@ pub struct Insn {
 
 impl Insn {
     pub const fn sse(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::Sse, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::Sse,
+            store_opcode: 0,
+        }
     }
     pub const fn sse_imm(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::SseImm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::SseImm,
+            store_opcode: 0,
+        }
     }
     pub const fn avx(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::AvxXXXm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::AvxXXXm,
+            store_opcode: 0,
+        }
     }
     pub const fn avx_imm(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::AvxXXXmImm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::AvxXXXmImm,
+            store_opcode: 0,
+        }
     }
     pub const fn avx_k(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::AvxKXXm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::AvxKXXm,
+            store_opcode: 0,
+        }
     }
     pub const fn avx_k_imm(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::AvxKXXmImm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::AvxKXXmImm,
+            store_opcode: 0,
+        }
     }
     pub const fn vex_xm(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::VexXXm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::VexXXm,
+            store_opcode: 0,
+        }
     }
     pub const fn vex_xm_imm(name: &'static str, flags: u64, opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode, pattern: Pattern::VexXXmImm, store_opcode: 0 }
+        Self {
+            name,
+            type_flags: flags,
+            opcode,
+            pattern: Pattern::VexXXmImm,
+            store_opcode: 0,
+        }
     }
-    pub const fn vex_mov(name: &'static str, flags: u64, load_opcode: u8, store_opcode: u8) -> Self {
-        Self { name, type_flags: flags, opcode: load_opcode, pattern: Pattern::VexMov, store_opcode }
+    pub const fn vex_mov(
+        name: &'static str,
+        flags: u64,
+        load_opcode: u8,
+        store_opcode: u8,
+    ) -> Self {
+        Self {
+            name,
+            type_flags: flags,
+            opcode: load_opcode,
+            pattern: Pattern::VexMov,
+            store_opcode,
+        }
     }
 }
 
-pub mod instructions;
 pub mod avx512;
 pub mod codegen;
+pub mod instructions;

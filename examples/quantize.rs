@@ -136,7 +136,9 @@ fn main() -> Result<()> {
 
     for v in q_tbl.iter_mut() {
         *v /= q;
-        if *v == 0 { *v = 1; }
+        if *v == 0 {
+            *v = 1;
+        }
     }
 
     // Generate random source data

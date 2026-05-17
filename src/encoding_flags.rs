@@ -167,24 +167,32 @@ impl TypeFlags {
 impl core::ops::BitOr for TypeFlags {
     type Output = Self;
     #[inline]
-    fn bitor(self, rhs: Self) -> Self { Self(self.0 | rhs.0) }
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
 }
 
 impl core::ops::BitAnd for TypeFlags {
     type Output = Self;
     #[inline]
-    fn bitand(self, rhs: Self) -> Self { Self(self.0 & rhs.0) }
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
 }
 
 impl core::ops::BitOrAssign for TypeFlags {
     #[inline]
-    fn bitor_assign(&mut self, rhs: Self) { self.0 |= rhs.0; }
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
 }
 
 impl core::ops::Not for TypeFlags {
     type Output = Self;
     #[inline]
-    fn not(self) -> Self { Self(!self.0) }
+    fn not(self) -> Self {
+        Self(!self.0)
+    }
 }
 
 #[cfg(test)]

@@ -19,9 +19,15 @@ impl CpuType {
     }
     pub const fn from_id(id: u32) -> Self {
         if id < 64 {
-            Self { lo: 1u64 << id, hi: 0 }
+            Self {
+                lo: 1u64 << id,
+                hi: 0,
+            }
         } else {
-            Self { lo: 0, hi: 1u64 << (id - 64) }
+            Self {
+                lo: 0,
+                hi: 1u64 << (id - 64),
+            }
         }
     }
     pub fn contains(self, other: Self) -> bool {
@@ -35,7 +41,10 @@ impl CpuType {
 impl std::ops::BitOr for CpuType {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self {
-        Self { lo: self.lo | rhs.lo, hi: self.hi | rhs.hi }
+        Self {
+            lo: self.lo | rhs.lo,
+            hi: self.hi | rhs.hi,
+        }
     }
 }
 
@@ -49,7 +58,10 @@ impl std::ops::BitOrAssign for CpuType {
 impl std::ops::BitAnd for CpuType {
     type Output = Self;
     fn bitand(self, rhs: Self) -> Self {
-        Self { lo: self.lo & rhs.lo, hi: self.hi & rhs.hi }
+        Self {
+            lo: self.lo & rhs.lo,
+            hi: self.hi & rhs.hi,
+        }
     }
 }
 
@@ -60,104 +72,104 @@ macro_rules! cpu_feature {
     };
 }
 
-cpu_feature!(MMX,              0);
-cpu_feature!(MMX2,             1);
-cpu_feature!(CMOV,             2);
-cpu_feature!(SSE,              3);
-cpu_feature!(SSE2,             4);
-cpu_feature!(SSE3,             5);
-cpu_feature!(SSSE3,            6);
-cpu_feature!(SSE41,            7);
-cpu_feature!(SSE42,            8);
-cpu_feature!(POPCNT,           9);
-cpu_feature!(AESNI,           10);
-cpu_feature!(AVX512_FP16,     11);
-cpu_feature!(OSXSAVE,         12);
-cpu_feature!(PCLMULQDQ,       13);
-cpu_feature!(AVX,             14);
-cpu_feature!(FMA,             15);
-cpu_feature!(F3DN,            16);
-cpu_feature!(E3DN,            17);
-cpu_feature!(WAITPKG,         18);
-cpu_feature!(RDTSCP,          19);
-cpu_feature!(AVX2,            20);
-cpu_feature!(BMI1,            21);
-cpu_feature!(BMI2,            22);
-cpu_feature!(LZCNT,           23);
-cpu_feature!(INTEL,           24);
-cpu_feature!(AMD,             25);
-cpu_feature!(ENHANCED_REP,    26);
-cpu_feature!(RDRAND,          27);
-cpu_feature!(ADX,             28);
-cpu_feature!(RDSEED,          29);
-cpu_feature!(SMAP,            30);
-cpu_feature!(HLE,             31);
-cpu_feature!(RTM,             32);
-cpu_feature!(F16C,            33);
-cpu_feature!(MOVBE,           34);
-cpu_feature!(AVX512F,         35);
-cpu_feature!(AVX512DQ,        36);
-cpu_feature!(AVX512_IFMA,     37);
-cpu_feature!(AVX512PF,        38);
-cpu_feature!(AVX512ER,        39);
-cpu_feature!(AVX512CD,        40);
-cpu_feature!(AVX512BW,        41);
-cpu_feature!(AVX512VL,        42);
-cpu_feature!(AVX512_VBMI,     43);
-cpu_feature!(AVX512_4VNNIW,   44);
-cpu_feature!(AVX512_4FMAPS,   45);
-cpu_feature!(PREFETCHWT1,     46);
-cpu_feature!(PREFETCHW,       47);
-cpu_feature!(SHA,             48);
-cpu_feature!(MPX,             49);
-cpu_feature!(AVX512_VBMI2,    50);
-cpu_feature!(GFNI,            51);
-cpu_feature!(VAES,            52);
-cpu_feature!(VPCLMULQDQ,      53);
-cpu_feature!(AVX512_VNNI,     54);
-cpu_feature!(AVX512_BITALG,   55);
+cpu_feature!(MMX, 0);
+cpu_feature!(MMX2, 1);
+cpu_feature!(CMOV, 2);
+cpu_feature!(SSE, 3);
+cpu_feature!(SSE2, 4);
+cpu_feature!(SSE3, 5);
+cpu_feature!(SSSE3, 6);
+cpu_feature!(SSE41, 7);
+cpu_feature!(SSE42, 8);
+cpu_feature!(POPCNT, 9);
+cpu_feature!(AESNI, 10);
+cpu_feature!(AVX512_FP16, 11);
+cpu_feature!(OSXSAVE, 12);
+cpu_feature!(PCLMULQDQ, 13);
+cpu_feature!(AVX, 14);
+cpu_feature!(FMA, 15);
+cpu_feature!(F3DN, 16);
+cpu_feature!(E3DN, 17);
+cpu_feature!(WAITPKG, 18);
+cpu_feature!(RDTSCP, 19);
+cpu_feature!(AVX2, 20);
+cpu_feature!(BMI1, 21);
+cpu_feature!(BMI2, 22);
+cpu_feature!(LZCNT, 23);
+cpu_feature!(INTEL, 24);
+cpu_feature!(AMD, 25);
+cpu_feature!(ENHANCED_REP, 26);
+cpu_feature!(RDRAND, 27);
+cpu_feature!(ADX, 28);
+cpu_feature!(RDSEED, 29);
+cpu_feature!(SMAP, 30);
+cpu_feature!(HLE, 31);
+cpu_feature!(RTM, 32);
+cpu_feature!(F16C, 33);
+cpu_feature!(MOVBE, 34);
+cpu_feature!(AVX512F, 35);
+cpu_feature!(AVX512DQ, 36);
+cpu_feature!(AVX512_IFMA, 37);
+cpu_feature!(AVX512PF, 38);
+cpu_feature!(AVX512ER, 39);
+cpu_feature!(AVX512CD, 40);
+cpu_feature!(AVX512BW, 41);
+cpu_feature!(AVX512VL, 42);
+cpu_feature!(AVX512_VBMI, 43);
+cpu_feature!(AVX512_4VNNIW, 44);
+cpu_feature!(AVX512_4FMAPS, 45);
+cpu_feature!(PREFETCHWT1, 46);
+cpu_feature!(PREFETCHW, 47);
+cpu_feature!(SHA, 48);
+cpu_feature!(MPX, 49);
+cpu_feature!(AVX512_VBMI2, 50);
+cpu_feature!(GFNI, 51);
+cpu_feature!(VAES, 52);
+cpu_feature!(VPCLMULQDQ, 53);
+cpu_feature!(AVX512_VNNI, 54);
+cpu_feature!(AVX512_BITALG, 55);
 cpu_feature!(AVX512_VPOPCNTDQ, 56);
-cpu_feature!(AVX512_BF16,     57);
+cpu_feature!(AVX512_BF16, 57);
 cpu_feature!(AVX512_VP2INTERSECT, 58);
-cpu_feature!(AMX_TILE,        59);
-cpu_feature!(AMX_INT8,        60);
-cpu_feature!(AMX_BF16,        61);
-cpu_feature!(AVX_VNNI,        62);
-cpu_feature!(CLFLUSHOPT,      63);
-cpu_feature!(CLDEMOTE,        64);
-cpu_feature!(MOVDIRI,         65);
-cpu_feature!(MOVDIR64B,       66);
-cpu_feature!(CLZERO,          67);
-cpu_feature!(AMX_FP16,        68);
-cpu_feature!(AVX_VNNI_INT8,   69);
-cpu_feature!(AVX_NE_CONVERT,  70);
-cpu_feature!(AVX_IFMA,        71);
-cpu_feature!(RAO_INT,         72);
-cpu_feature!(CMPCCXADD,       73);
-cpu_feature!(PREFETCHITI,     74);
-cpu_feature!(SERIALIZE,       75);
-cpu_feature!(UINTR,           76);
-cpu_feature!(XSAVE,           77);
-cpu_feature!(SHA512,          78);
-cpu_feature!(SM3,             79);
-cpu_feature!(SM4,             80);
-cpu_feature!(AVX_VNNI_INT16,  81);
-cpu_feature!(APX_F,           82);
-cpu_feature!(AVX10,           83);
-cpu_feature!(AESKLE,          84);
-cpu_feature!(WIDE_KL,         85);
-cpu_feature!(KEYLOCKER,       86);
-cpu_feature!(KEYLOCKER_WIDE,  87);
-cpu_feature!(SSE4A,           88);
-cpu_feature!(CLWB,            89);
-cpu_feature!(TSXLDTRK,        90);
-cpu_feature!(AMX_TRANSPOSE,   91);
-cpu_feature!(AMX_TF32,        92);
-cpu_feature!(AMX_AVX512,      93);
-cpu_feature!(AMX_MOVRS,       94);
-cpu_feature!(AMX_FP8,         95);
-cpu_feature!(MOVRS,           96);
-cpu_feature!(HYBRID,          97);
+cpu_feature!(AMX_TILE, 59);
+cpu_feature!(AMX_INT8, 60);
+cpu_feature!(AMX_BF16, 61);
+cpu_feature!(AVX_VNNI, 62);
+cpu_feature!(CLFLUSHOPT, 63);
+cpu_feature!(CLDEMOTE, 64);
+cpu_feature!(MOVDIRI, 65);
+cpu_feature!(MOVDIR64B, 66);
+cpu_feature!(CLZERO, 67);
+cpu_feature!(AMX_FP16, 68);
+cpu_feature!(AVX_VNNI_INT8, 69);
+cpu_feature!(AVX_NE_CONVERT, 70);
+cpu_feature!(AVX_IFMA, 71);
+cpu_feature!(RAO_INT, 72);
+cpu_feature!(CMPCCXADD, 73);
+cpu_feature!(PREFETCHITI, 74);
+cpu_feature!(SERIALIZE, 75);
+cpu_feature!(UINTR, 76);
+cpu_feature!(XSAVE, 77);
+cpu_feature!(SHA512, 78);
+cpu_feature!(SM3, 79);
+cpu_feature!(SM4, 80);
+cpu_feature!(AVX_VNNI_INT16, 81);
+cpu_feature!(APX_F, 82);
+cpu_feature!(AVX10, 83);
+cpu_feature!(AESKLE, 84);
+cpu_feature!(WIDE_KL, 85);
+cpu_feature!(KEYLOCKER, 86);
+cpu_feature!(KEYLOCKER_WIDE, 87);
+cpu_feature!(SSE4A, 88);
+cpu_feature!(CLWB, 89);
+cpu_feature!(TSXLDTRK, 90);
+cpu_feature!(AMX_TRANSPOSE, 91);
+cpu_feature!(AMX_TF32, 92);
+cpu_feature!(AMX_AVX512, 93);
+cpu_feature!(AMX_MOVRS, 94);
+cpu_feature!(AMX_FP8, 95);
+cpu_feature!(MOVRS, 96);
+cpu_feature!(HYBRID, 97);
 
 /// CPU feature detection.
 pub struct Cpu {
@@ -230,8 +242,11 @@ impl Cpu {
         match level {
             1 => self.num_cores[0], // SmtLevel
             2 => {
-                if self.num_cores[0] == 0 { 0 }
-                else { self.num_cores[1] / self.num_cores[0] }
+                if self.num_cores[0] == 0 {
+                    0
+                } else {
+                    self.num_cores[1] / self.num_cores[0]
+                }
             } // CoreLevel
             _ => 0,
         }
@@ -293,65 +308,151 @@ impl Cpu {
         let max_extended = rext.eax;
         if max_extended >= 0x80000001 {
             let r2 = __cpuid(0x80000001);
-            if r2.ecx & (1 << 5) != 0 { self.type_ |= LZCNT; }
-            if r2.ecx & (1 << 6) != 0 { self.type_ |= SSE4A; }
-            if r2.ecx & (1 << 8) != 0 { self.type_ |= PREFETCHW; }
-            if r2.edx & (1 << 15) != 0 { self.type_ |= CMOV; }
-            if r2.edx & (1 << 22) != 0 { self.type_ |= MMX2; }
-            if r2.edx & (1 << 27) != 0 { self.type_ |= RDTSCP; }
-            if r2.edx & (1 << 30) != 0 { self.type_ |= E3DN; }
-            if r2.edx & (1 << 31) != 0 { self.type_ |= F3DN; }
+            if r2.ecx & (1 << 5) != 0 {
+                self.type_ |= LZCNT;
+            }
+            if r2.ecx & (1 << 6) != 0 {
+                self.type_ |= SSE4A;
+            }
+            if r2.ecx & (1 << 8) != 0 {
+                self.type_ |= PREFETCHW;
+            }
+            if r2.edx & (1 << 15) != 0 {
+                self.type_ |= CMOV;
+            }
+            if r2.edx & (1 << 22) != 0 {
+                self.type_ |= MMX2;
+            }
+            if r2.edx & (1 << 27) != 0 {
+                self.type_ |= RDTSCP;
+            }
+            if r2.edx & (1 << 30) != 0 {
+                self.type_ |= E3DN;
+            }
+            if r2.edx & (1 << 31) != 0 {
+                self.type_ |= F3DN;
+            }
         }
         if max_extended >= 0x80000008 {
             let r2 = __cpuid(0x80000008);
-            if r2.ebx & 1 != 0 { self.type_ |= CLZERO; }
+            if r2.ebx & 1 != 0 {
+                self.type_ |= CLZERO;
+            }
         }
 
         // Leaf 1 — basic features
         let r1 = __cpuid(1);
-        if r1.ecx & (1 << 0) != 0 { self.type_ |= SSE3; }
-        if r1.ecx & (1 << 1) != 0 { self.type_ |= PCLMULQDQ; }
-        if r1.ecx & (1 << 9) != 0 { self.type_ |= SSSE3; }
-        if r1.ecx & (1 << 19) != 0 { self.type_ |= SSE41; }
-        if r1.ecx & (1 << 20) != 0 { self.type_ |= SSE42; }
-        if r1.ecx & (1 << 22) != 0 { self.type_ |= MOVBE; }
-        if r1.ecx & (1 << 23) != 0 { self.type_ |= POPCNT; }
-        if r1.ecx & (1 << 25) != 0 { self.type_ |= AESNI; }
-        if r1.ecx & (1 << 26) != 0 { self.type_ |= XSAVE; }
-        if r1.ecx & (1 << 27) != 0 { self.type_ |= OSXSAVE; }
-        if r1.ecx & (1 << 29) != 0 { self.type_ |= F16C; }
-        if r1.ecx & (1 << 30) != 0 { self.type_ |= RDRAND; }
-        if r1.edx & (1 << 15) != 0 { self.type_ |= CMOV; }
-        if r1.edx & (1 << 23) != 0 { self.type_ |= MMX; }
-        if r1.edx & (1 << 25) != 0 { self.type_ |= MMX2 | SSE; }
-        if r1.edx & (1 << 26) != 0 { self.type_ |= SSE2; }
+        if r1.ecx & (1 << 0) != 0 {
+            self.type_ |= SSE3;
+        }
+        if r1.ecx & (1 << 1) != 0 {
+            self.type_ |= PCLMULQDQ;
+        }
+        if r1.ecx & (1 << 9) != 0 {
+            self.type_ |= SSSE3;
+        }
+        if r1.ecx & (1 << 19) != 0 {
+            self.type_ |= SSE41;
+        }
+        if r1.ecx & (1 << 20) != 0 {
+            self.type_ |= SSE42;
+        }
+        if r1.ecx & (1 << 22) != 0 {
+            self.type_ |= MOVBE;
+        }
+        if r1.ecx & (1 << 23) != 0 {
+            self.type_ |= POPCNT;
+        }
+        if r1.ecx & (1 << 25) != 0 {
+            self.type_ |= AESNI;
+        }
+        if r1.ecx & (1 << 26) != 0 {
+            self.type_ |= XSAVE;
+        }
+        if r1.ecx & (1 << 27) != 0 {
+            self.type_ |= OSXSAVE;
+        }
+        if r1.ecx & (1 << 29) != 0 {
+            self.type_ |= F16C;
+        }
+        if r1.ecx & (1 << 30) != 0 {
+            self.type_ |= RDRAND;
+        }
+        if r1.edx & (1 << 15) != 0 {
+            self.type_ |= CMOV;
+        }
+        if r1.edx & (1 << 23) != 0 {
+            self.type_ |= MMX;
+        }
+        if r1.edx & (1 << 25) != 0 {
+            self.type_ |= MMX2 | SSE;
+        }
+        if r1.edx & (1 << 26) != 0 {
+            self.type_ |= SSE2;
+        }
 
         // AVX/AVX-512 require OS XSAVE support
         if self.has(OSXSAVE) {
             let bv = _xgetbv(0);
             if (bv & 6) == 6 {
-                if r1.ecx & (1 << 12) != 0 { self.type_ |= FMA; }
-                if r1.ecx & (1 << 28) != 0 { self.type_ |= AVX; }
+                if r1.ecx & (1 << 12) != 0 {
+                    self.type_ |= FMA;
+                }
+                if r1.ecx & (1 << 28) != 0 {
+                    self.type_ |= AVX;
+                }
                 // AVX-512 state check
                 if ((bv >> 5) & 7) == 7 {
                     let r7 = __cpuid_count(7, 0);
-                    if r7.ebx & (1 << 16) != 0 { self.type_ |= AVX512F; }
+                    if r7.ebx & (1 << 16) != 0 {
+                        self.type_ |= AVX512F;
+                    }
                     if self.has(AVX512F) {
-                        if r7.ebx & (1 << 17) != 0 { self.type_ |= AVX512DQ; }
-                        if r7.ebx & (1 << 21) != 0 { self.type_ |= AVX512_IFMA; }
-                        if r7.ebx & (1 << 26) != 0 { self.type_ |= AVX512PF; }
-                        if r7.ebx & (1 << 27) != 0 { self.type_ |= AVX512ER; }
-                        if r7.ebx & (1 << 28) != 0 { self.type_ |= AVX512CD; }
-                        if r7.ebx & (1 << 30) != 0 { self.type_ |= AVX512BW; }
-                        if r7.ebx & (1 << 31) != 0 { self.type_ |= AVX512VL; }
-                        if r7.ecx & (1 << 1) != 0 { self.type_ |= AVX512_VBMI; }
-                        if r7.ecx & (1 << 6) != 0 { self.type_ |= AVX512_VBMI2; }
-                        if r7.ecx & (1 << 11) != 0 { self.type_ |= AVX512_VNNI; }
-                        if r7.ecx & (1 << 12) != 0 { self.type_ |= AVX512_BITALG; }
-                        if r7.ecx & (1 << 14) != 0 { self.type_ |= AVX512_VPOPCNTDQ; }
-                        if r7.edx & (1 << 2) != 0 { self.type_ |= AVX512_4VNNIW; }
-                        if r7.edx & (1 << 3) != 0 { self.type_ |= AVX512_4FMAPS; }
-                        if r7.edx & (1 << 8) != 0 { self.type_ |= AVX512_VP2INTERSECT; }
+                        if r7.ebx & (1 << 17) != 0 {
+                            self.type_ |= AVX512DQ;
+                        }
+                        if r7.ebx & (1 << 21) != 0 {
+                            self.type_ |= AVX512_IFMA;
+                        }
+                        if r7.ebx & (1 << 26) != 0 {
+                            self.type_ |= AVX512PF;
+                        }
+                        if r7.ebx & (1 << 27) != 0 {
+                            self.type_ |= AVX512ER;
+                        }
+                        if r7.ebx & (1 << 28) != 0 {
+                            self.type_ |= AVX512CD;
+                        }
+                        if r7.ebx & (1 << 30) != 0 {
+                            self.type_ |= AVX512BW;
+                        }
+                        if r7.ebx & (1 << 31) != 0 {
+                            self.type_ |= AVX512VL;
+                        }
+                        if r7.ecx & (1 << 1) != 0 {
+                            self.type_ |= AVX512_VBMI;
+                        }
+                        if r7.ecx & (1 << 6) != 0 {
+                            self.type_ |= AVX512_VBMI2;
+                        }
+                        if r7.ecx & (1 << 11) != 0 {
+                            self.type_ |= AVX512_VNNI;
+                        }
+                        if r7.ecx & (1 << 12) != 0 {
+                            self.type_ |= AVX512_BITALG;
+                        }
+                        if r7.ecx & (1 << 14) != 0 {
+                            self.type_ |= AVX512_VPOPCNTDQ;
+                        }
+                        if r7.edx & (1 << 2) != 0 {
+                            self.type_ |= AVX512_4VNNIW;
+                        }
+                        if r7.edx & (1 << 3) != 0 {
+                            self.type_ |= AVX512_4FMAPS;
+                        }
+                        if r7.edx & (1 << 8) != 0 {
+                            self.type_ |= AVX512_VP2INTERSECT;
+                        }
                         if self.has(AVX512BW) && (r7.edx & (1 << 23) != 0) {
                             self.type_ |= AVX512_FP16;
                         }
@@ -364,70 +465,172 @@ impl Cpu {
         if max_num >= 7 {
             let r7 = __cpuid_count(7, 0);
             let max_sub = r7.eax;
-            if self.has(AVX) && (r7.ebx & (1 << 5) != 0) { self.type_ |= AVX2; }
-            if r7.ebx & (1 << 3) != 0 { self.type_ |= BMI1; }
-            if r7.ebx & (1 << 4) != 0 { self.type_ |= HLE; }
-            if r7.ebx & (1 << 8) != 0 { self.type_ |= BMI2; }
-            if r7.ebx & (1 << 9) != 0 { self.type_ |= ENHANCED_REP; }
-            if r7.ebx & (1 << 11) != 0 { self.type_ |= RTM; }
-            if r7.ebx & (1 << 14) != 0 { self.type_ |= MPX; }
-            if r7.ebx & (1 << 18) != 0 { self.type_ |= RDSEED; }
-            if r7.ebx & (1 << 19) != 0 { self.type_ |= ADX; }
-            if r7.ebx & (1 << 20) != 0 { self.type_ |= SMAP; }
-            if r7.ebx & (1 << 23) != 0 { self.type_ |= CLFLUSHOPT; }
-            if r7.ebx & (1 << 24) != 0 { self.type_ |= CLWB; }
-            if r7.ebx & (1 << 29) != 0 { self.type_ |= SHA; }
-            if r7.ecx & (1 << 0) != 0 { self.type_ |= PREFETCHWT1; }
-            if r7.ecx & (1 << 5) != 0 { self.type_ |= WAITPKG; }
-            if r7.ecx & (1 << 8) != 0 { self.type_ |= GFNI; }
-            if r7.ecx & (1 << 9) != 0 { self.type_ |= VAES; }
-            if r7.ecx & (1 << 10) != 0 { self.type_ |= VPCLMULQDQ; }
-            if r7.ecx & (1 << 23) != 0 { self.type_ |= KEYLOCKER; }
-            if r7.ecx & (1 << 25) != 0 { self.type_ |= CLDEMOTE; }
-            if r7.ecx & (1 << 27) != 0 { self.type_ |= MOVDIRI; }
-            if r7.ecx & (1 << 28) != 0 { self.type_ |= MOVDIR64B; }
-            if r7.edx & (1 << 5) != 0 { self.type_ |= UINTR; }
-            if r7.edx & (1 << 14) != 0 { self.type_ |= SERIALIZE; }
-            if r7.edx & (1 << 15) != 0 { self.type_ |= HYBRID; }
-            if r7.edx & (1 << 16) != 0 { self.type_ |= TSXLDTRK; }
-            if r7.edx & (1 << 22) != 0 { self.type_ |= AMX_BF16; }
-            if r7.edx & (1 << 24) != 0 { self.type_ |= AMX_TILE; }
-            if r7.edx & (1 << 25) != 0 { self.type_ |= AMX_INT8; }
+            if self.has(AVX) && (r7.ebx & (1 << 5) != 0) {
+                self.type_ |= AVX2;
+            }
+            if r7.ebx & (1 << 3) != 0 {
+                self.type_ |= BMI1;
+            }
+            if r7.ebx & (1 << 4) != 0 {
+                self.type_ |= HLE;
+            }
+            if r7.ebx & (1 << 8) != 0 {
+                self.type_ |= BMI2;
+            }
+            if r7.ebx & (1 << 9) != 0 {
+                self.type_ |= ENHANCED_REP;
+            }
+            if r7.ebx & (1 << 11) != 0 {
+                self.type_ |= RTM;
+            }
+            if r7.ebx & (1 << 14) != 0 {
+                self.type_ |= MPX;
+            }
+            if r7.ebx & (1 << 18) != 0 {
+                self.type_ |= RDSEED;
+            }
+            if r7.ebx & (1 << 19) != 0 {
+                self.type_ |= ADX;
+            }
+            if r7.ebx & (1 << 20) != 0 {
+                self.type_ |= SMAP;
+            }
+            if r7.ebx & (1 << 23) != 0 {
+                self.type_ |= CLFLUSHOPT;
+            }
+            if r7.ebx & (1 << 24) != 0 {
+                self.type_ |= CLWB;
+            }
+            if r7.ebx & (1 << 29) != 0 {
+                self.type_ |= SHA;
+            }
+            if r7.ecx & (1 << 0) != 0 {
+                self.type_ |= PREFETCHWT1;
+            }
+            if r7.ecx & (1 << 5) != 0 {
+                self.type_ |= WAITPKG;
+            }
+            if r7.ecx & (1 << 8) != 0 {
+                self.type_ |= GFNI;
+            }
+            if r7.ecx & (1 << 9) != 0 {
+                self.type_ |= VAES;
+            }
+            if r7.ecx & (1 << 10) != 0 {
+                self.type_ |= VPCLMULQDQ;
+            }
+            if r7.ecx & (1 << 23) != 0 {
+                self.type_ |= KEYLOCKER;
+            }
+            if r7.ecx & (1 << 25) != 0 {
+                self.type_ |= CLDEMOTE;
+            }
+            if r7.ecx & (1 << 27) != 0 {
+                self.type_ |= MOVDIRI;
+            }
+            if r7.ecx & (1 << 28) != 0 {
+                self.type_ |= MOVDIR64B;
+            }
+            if r7.edx & (1 << 5) != 0 {
+                self.type_ |= UINTR;
+            }
+            if r7.edx & (1 << 14) != 0 {
+                self.type_ |= SERIALIZE;
+            }
+            if r7.edx & (1 << 15) != 0 {
+                self.type_ |= HYBRID;
+            }
+            if r7.edx & (1 << 16) != 0 {
+                self.type_ |= TSXLDTRK;
+            }
+            if r7.edx & (1 << 22) != 0 {
+                self.type_ |= AMX_BF16;
+            }
+            if r7.edx & (1 << 24) != 0 {
+                self.type_ |= AMX_TILE;
+            }
+            if r7.edx & (1 << 25) != 0 {
+                self.type_ |= AMX_INT8;
+            }
 
             if max_sub >= 1 {
                 let r71 = __cpuid_count(7, 1);
-                if r71.eax & (1 << 0) != 0 { self.type_ |= SHA512; }
-                if r71.eax & (1 << 1) != 0 { self.type_ |= SM3; }
-                if r71.eax & (1 << 2) != 0 { self.type_ |= SM4; }
-                if r71.eax & (1 << 3) != 0 { self.type_ |= RAO_INT; }
-                if r71.eax & (1 << 4) != 0 { self.type_ |= AVX_VNNI; }
+                if r71.eax & (1 << 0) != 0 {
+                    self.type_ |= SHA512;
+                }
+                if r71.eax & (1 << 1) != 0 {
+                    self.type_ |= SM3;
+                }
+                if r71.eax & (1 << 2) != 0 {
+                    self.type_ |= SM4;
+                }
+                if r71.eax & (1 << 3) != 0 {
+                    self.type_ |= RAO_INT;
+                }
+                if r71.eax & (1 << 4) != 0 {
+                    self.type_ |= AVX_VNNI;
+                }
                 if self.has(AVX512F) && (r71.eax & (1 << 5) != 0) {
                     self.type_ |= AVX512_BF16;
                 }
-                if r71.eax & (1 << 7) != 0 { self.type_ |= CMPCCXADD; }
-                if r71.eax & (1 << 21) != 0 { self.type_ |= AMX_FP16; }
-                if r71.eax & (1 << 23) != 0 { self.type_ |= AVX_IFMA; }
-                if r71.eax & (1 << 31) != 0 { self.type_ |= MOVRS; }
-                if r71.edx & (1 << 4) != 0 { self.type_ |= AVX_VNNI_INT8; }
-                if r71.edx & (1 << 5) != 0 { self.type_ |= AVX_NE_CONVERT; }
-                if r71.edx & (1 << 10) != 0 { self.type_ |= AVX_VNNI_INT16; }
-                if r71.edx & (1 << 14) != 0 { self.type_ |= PREFETCHITI; }
-                if r71.edx & (1 << 19) != 0 { self.type_ |= AVX10; }
-                if r71.edx & (1 << 21) != 0 { self.type_ |= APX_F; }
+                if r71.eax & (1 << 7) != 0 {
+                    self.type_ |= CMPCCXADD;
+                }
+                if r71.eax & (1 << 21) != 0 {
+                    self.type_ |= AMX_FP16;
+                }
+                if r71.eax & (1 << 23) != 0 {
+                    self.type_ |= AVX_IFMA;
+                }
+                if r71.eax & (1 << 31) != 0 {
+                    self.type_ |= MOVRS;
+                }
+                if r71.edx & (1 << 4) != 0 {
+                    self.type_ |= AVX_VNNI_INT8;
+                }
+                if r71.edx & (1 << 5) != 0 {
+                    self.type_ |= AVX_NE_CONVERT;
+                }
+                if r71.edx & (1 << 10) != 0 {
+                    self.type_ |= AVX_VNNI_INT16;
+                }
+                if r71.edx & (1 << 14) != 0 {
+                    self.type_ |= PREFETCHITI;
+                }
+                if r71.edx & (1 << 19) != 0 {
+                    self.type_ |= AVX10;
+                }
+                if r71.edx & (1 << 21) != 0 {
+                    self.type_ |= APX_F;
+                }
 
                 let r1e = __cpuid_count(0x1e, 1);
-                if r1e.eax & (1 << 4) != 0 { self.type_ |= AMX_FP8; }
-                if r1e.eax & (1 << 5) != 0 { self.type_ |= AMX_TRANSPOSE; }
-                if r1e.eax & (1 << 6) != 0 { self.type_ |= AMX_TF32; }
-                if r1e.eax & (1 << 7) != 0 { self.type_ |= AMX_AVX512; }
-                if r1e.eax & (1 << 8) != 0 { self.type_ |= AMX_MOVRS; }
+                if r1e.eax & (1 << 4) != 0 {
+                    self.type_ |= AMX_FP8;
+                }
+                if r1e.eax & (1 << 5) != 0 {
+                    self.type_ |= AMX_TRANSPOSE;
+                }
+                if r1e.eax & (1 << 6) != 0 {
+                    self.type_ |= AMX_TF32;
+                }
+                if r1e.eax & (1 << 7) != 0 {
+                    self.type_ |= AMX_AVX512;
+                }
+                if r1e.eax & (1 << 8) != 0 {
+                    self.type_ |= AMX_MOVRS;
+                }
             }
         }
 
         if max_num >= 0x19 {
             let r19 = __cpuid_count(0x19, 0);
-            if r19.ebx & 1 != 0 { self.type_ |= AESKLE; }
-            if r19.ebx & (1 << 2) != 0 { self.type_ |= WIDE_KL; }
+            if r19.ebx & 1 != 0 {
+                self.type_ |= AESKLE;
+            }
+            if r19.ebx & (1 << 2) != 0 {
+                self.type_ |= WIDE_KL;
+            }
             if self.has(KEYLOCKER) || self.has(AESKLE) || self.has(WIDE_KL) {
                 self.type_ |= KEYLOCKER_WIDE;
             }
@@ -465,7 +668,9 @@ impl Cpu {
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn set_num_cores(&mut self) {
-        if !self.has(INTEL) && !self.has(AMD) { return; }
+        if !self.has(INTEL) && !self.has(AMD) {
+            return;
+        }
 
         let r0 = unsafe { __cpuid(0) };
         if r0.eax >= 0xB {
@@ -540,8 +745,12 @@ impl Cpu {
                 for sub in 0..10u32 {
                     let r = unsafe { __cpuid_count(0x8000001D, sub) };
                     let cache_type = extract_bit(r.eax, 0, 4);
-                    if cache_type == 0 { break; }
-                    if cache_type == 2 { continue; } // instruction cache
+                    if cache_type == 0 {
+                        break;
+                    }
+                    if cache_type == 2 {
+                        continue;
+                    } // instruction cache
                     let fully_assoc = extract_bit(r.eax, 9, 9);
                     let mut sharing = extract_bit(r.eax, 14, 25) + 1;
                     let ways = extract_bit(r.ebx, 22, 31) + 1;
@@ -549,7 +758,9 @@ impl Cpu {
                     let line_size = extract_bit(r.ebx, 0, 11) + 1;
                     let sets = r.ecx + 1;
                     let mut size = line_size * partitions * ways;
-                    if fully_assoc == 0 { size *= sets; }
+                    if fully_assoc == 0 {
+                        size *= sets;
+                    }
                     if sub > 0 {
                         sharing = sharing.min(self.num_cores[1]);
                         sharing /= self.cores_sharing_data_cache[0].max(1);
@@ -583,18 +794,28 @@ impl Cpu {
             for i in 0..10u32 {
                 let r = unsafe { __cpuid_count(4, i) };
                 let cache_type = extract_bit(r.eax, 0, 4);
-                if cache_type == 0 { break; } // NO_CACHE
-                if cache_type == 1 || cache_type == 3 { // DATA or UNIFIED
+                if cache_type == 0 {
+                    break;
+                } // NO_CACHE
+                if cache_type == 1 || cache_type == 3 {
+                    // DATA or UNIFIED
                     let mut actual = extract_bit(r.eax, 14, 25) + 1;
-                    if logical_cores != 0 { actual = actual.min(logical_cores); }
+                    if logical_cores != 0 {
+                        actual = actual.min(logical_cores);
+                    }
                     let size = (extract_bit(r.ebx, 22, 31) + 1)
                         * (extract_bit(r.ebx, 12, 21) + 1)
                         * (extract_bit(r.ebx, 0, 11) + 1)
                         * (r.ecx + 1);
                     let lvl = self.data_cache_levels as usize;
                     self.data_cache_size[lvl] = size;
-                    let sw = if smt_width == 0 && cache_type == 1 { actual } else { smt_width };
-                    self.cores_sharing_data_cache[lvl] = if sw > 0 { (actual / sw).max(1) } else { 1 };
+                    let sw = if smt_width == 0 && cache_type == 1 {
+                        actual
+                    } else {
+                        smt_width
+                    };
+                    self.cores_sharing_data_cache[lvl] =
+                        if sw > 0 { (actual / sw).max(1) } else { 1 };
                     self.data_cache_levels += 1;
                 }
             }

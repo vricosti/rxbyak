@@ -1,6 +1,5 @@
 /// Tests for auto-generated instruction methods (Phase 6 validation).
 /// Verifies byte-level encoding against known-good NASM output.
-
 use rxbyak::*;
 
 fn assemble(f: impl FnOnce(&mut CodeAssembler) -> Result<()>) -> Vec<u8> {

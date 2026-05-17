@@ -60,8 +60,7 @@ impl FuncGen {
     }
 
     fn gen_val(&mut self, var_name: &str) -> Result<()> {
-        let idx = *self.var_map.get(var_name)
-            .ok_or(Error::BadParameter)?;
+        let idx = *self.var_map.get(var_name).ok_or(Error::BadParameter)?;
         self.reg_idx += 1;
         let xmm = Reg::xmm(self.reg_idx as u8);
         self.asm.movsd(xmm, qword_ptr(RDI + (idx * 8) as i32))?;
@@ -120,7 +119,10 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
-        Parser { input: input.as_bytes(), pos: 0 }
+        Parser {
+            input: input.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn skip_ws(&mut self) {
@@ -148,7 +150,9 @@ impl<'a> Parser<'a> {
         {
             self.pos += 1;
         }
-        if self.pos == start { return None; }
+        if self.pos == start {
+            return None;
+        }
         let s = std::str::from_utf8(&self.input[start..self.pos]).ok()?;
         s.parse().ok()
     }
@@ -159,7 +163,9 @@ impl<'a> Parser<'a> {
         while self.pos < self.input.len() && self.input[self.pos].is_ascii_alphabetic() {
             self.pos += 1;
         }
-        if self.pos == start { return None; }
+        if self.pos == start {
+            return None;
+        }
         Some(String::from_utf8_lossy(&self.input[start..self.pos]).to_string())
     }
 
@@ -236,9 +242,7 @@ fn main() -> Result<()> {
     let poly = &args[2];
 
     // Parse variable names
-    let var_tbl: Vec<String> = var_str.split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+    let var_tbl: Vec<String> = var_str.split_whitespace().map(|s| s.to_string()).collect();
 
     print!("varTbl = {{ ");
     for (i, v) in var_tbl.iter().enumerate() {
@@ -266,7 +270,9 @@ fn main() -> Result<()> {
         let y = func(val_tbl.as_ptr());
         print!("f(");
         for (i, v) in val_tbl.iter().enumerate() {
-            if i > 0 { print!(", "); }
+            if i > 0 {
+                print!(", ");
+            }
             print!("{:.6}", v);
         }
         println!(")={:.6}", y);

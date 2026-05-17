@@ -1,6 +1,5 @@
 /// Error validation tests — ensures rxbyak correctly rejects invalid inputs.
 /// Ported from xbyak's bad_address.cpp.
-
 use rxbyak::*;
 
 // ─── ESP/RSP as index register ──────────────────────────────────
@@ -9,18 +8,14 @@ use rxbyak::*;
 fn test_esp_as_index_rejected() {
     // ESP cannot be used as an index register in SIB encoding.
     // dword_ptr() panics via .expect(), so we catch_unwind.
-    let result = std::panic::catch_unwind(|| {
-        dword_ptr(EAX + ESP * 2)
-    });
+    let result = std::panic::catch_unwind(|| dword_ptr(EAX + ESP * 2));
     assert!(result.is_err(), "ESP as index should be rejected");
 }
 
 #[test]
 fn test_rsp_as_index_rejected() {
     // RSP cannot be used as an index register.
-    let result = std::panic::catch_unwind(|| {
-        qword_ptr(RAX + RSP * 2)
-    });
+    let result = std::panic::catch_unwind(|| qword_ptr(RAX + RSP * 2));
     assert!(result.is_err(), "RSP as index should be rejected");
 }
 
@@ -91,7 +86,10 @@ fn test_movsxd_non64_dst() {
     let mut asm = CodeAssembler::new(4096).unwrap();
     // movsxd requires 64-bit destination
     let result = asm.movsxd(EAX, ECX);
-    assert!(result.is_err(), "movsxd eax, ecx should fail (need 64-bit dst)");
+    assert!(
+        result.is_err(),
+        "movsxd eax, ecx should fail (need 64-bit dst)"
+    );
 }
 
 // ─── EVEX invalid combinations ──────────────────────────────────
@@ -125,7 +123,10 @@ fn test_undefined_label() {
     asm.jmp(&label, JmpType::Near).unwrap();
     // Don't bind the label — ready() should fail
     let result = asm.ready();
-    assert!(result.is_err(), "undefined label should cause ready() to fail");
+    assert!(
+        result.is_err(),
+        "undefined label should cause ready() to fail"
+    );
 }
 
 #[test]
@@ -196,8 +197,12 @@ fn test_valid_evex_masks() {
 #[test]
 fn test_valid_rounding_modes() {
     let mut asm = CodeAssembler::new(4096).unwrap();
-    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae)).unwrap();
-    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RdSae)).unwrap();
-    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RuSae)).unwrap();
-    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RzSae)).unwrap();
+    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae))
+        .unwrap();
+    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RdSae))
+        .unwrap();
+    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RuSae))
+        .unwrap();
+    asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RzSae))
+        .unwrap();
 }

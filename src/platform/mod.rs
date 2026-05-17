@@ -22,39 +22,63 @@ pub enum ProtectMode {
 /// The memory is initially writable (RW).
 pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     #[cfg(unix)]
-    { unix::alloc_exec_mem(size) }
+    {
+        unix::alloc_exec_mem(size)
+    }
     #[cfg(windows)]
-    { windows::alloc_exec_mem(size) }
+    {
+        windows::alloc_exec_mem(size)
+    }
     #[cfg(not(any(unix, windows)))]
-    { Err(Error::CantAlloc) }
+    {
+        Err(Error::CantAlloc)
+    }
 }
 
 /// Free executable memory.
 pub unsafe fn free_exec_mem(ptr: *mut u8, size: usize) -> Result<()> {
     #[cfg(unix)]
-    { unix::free_exec_mem(ptr, size) }
+    {
+        unix::free_exec_mem(ptr, size)
+    }
     #[cfg(windows)]
-    { windows::free_exec_mem(ptr, size) }
+    {
+        windows::free_exec_mem(ptr, size)
+    }
     #[cfg(not(any(unix, windows)))]
-    { Err(Error::Munmap) }
+    {
+        Err(Error::Munmap)
+    }
 }
 
 /// Change memory protection.
 pub unsafe fn protect(ptr: *mut u8, size: usize, mode: ProtectMode) -> Result<()> {
     #[cfg(unix)]
-    { unix::protect(ptr, size, mode) }
+    {
+        unix::protect(ptr, size, mode)
+    }
     #[cfg(windows)]
-    { windows::protect(ptr, size, mode) }
+    {
+        windows::protect(ptr, size, mode)
+    }
     #[cfg(not(any(unix, windows)))]
-    { Err(Error::CantProtect) }
+    {
+        Err(Error::CantProtect)
+    }
 }
 
 /// Get the system page size.
 pub fn page_size() -> usize {
     #[cfg(unix)]
-    { unix::page_size() }
+    {
+        unix::page_size()
+    }
     #[cfg(windows)]
-    { windows::page_size() }
+    {
+        windows::page_size()
+    }
     #[cfg(not(any(unix, windows)))]
-    { 4096 }
+    {
+        4096
+    }
 }

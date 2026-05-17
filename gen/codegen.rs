@@ -1,5 +1,4 @@
 /// Code generation logic: transforms instruction tables into Rust method implementations.
-
 use super::{Insn, Pattern};
 use std::io::Write;
 
@@ -7,141 +6,554 @@ use std::io::Write;
 /// These will be skipped during code generation to avoid conflicts.
 const HANDWRITTEN: &[&str] = &[
     // GPR instructions
-    "nop", "ret", "push", "pop", "mov", "add", "or_", "adc", "sbb", "and_", "sub", "xor_",
-    "cmp", "lea", "test", "inc", "dec", "neg", "not_", "jmp", "call", "int3", "xchg",
-    "movzx", "movsx", "movsxd", "cdq", "cqo", "imul", "shl", "shr", "sar",
+    "nop",
+    "ret",
+    "push",
+    "pop",
+    "mov",
+    "add",
+    "or_",
+    "adc",
+    "sbb",
+    "and_",
+    "sub",
+    "xor_",
+    "cmp",
+    "lea",
+    "test",
+    "inc",
+    "dec",
+    "neg",
+    "not_",
+    "jmp",
+    "call",
+    "int3",
+    "xchg",
+    "movzx",
+    "movsx",
+    "movsxd",
+    "cdq",
+    "cqo",
+    "imul",
+    "shl",
+    "shr",
+    "sar",
     // Conditional jumps (hand-written with label support)
-    "jo", "jno", "jb", "jnb", "jz", "jnz", "jbe", "jnbe", "js", "jns", "jp", "jnp",
-    "jl", "jnl", "jle", "jnle", "je", "jne", "jc", "jnc", "ja", "jae", "jg", "jge",
+    "jo",
+    "jno",
+    "jb",
+    "jnb",
+    "jz",
+    "jnz",
+    "jbe",
+    "jnbe",
+    "js",
+    "jns",
+    "jp",
+    "jnp",
+    "jl",
+    "jnl",
+    "jle",
+    "jnle",
+    "je",
+    "jne",
+    "jc",
+    "jnc",
+    "ja",
+    "jae",
+    "jg",
+    "jge",
     // SSE (hand-written)
-    "addps", "addpd", "addss", "addsd", "subps", "subpd", "subss", "subsd",
-    "mulps", "mulpd", "mulss", "mulsd", "divps", "divpd", "divss", "divsd",
-    "xorps", "xorpd", "andps", "andpd", "orps", "orpd",
-    "sqrtps", "sqrtpd", "sqrtss", "sqrtsd",
-    "movaps", "movups", "movapd", "movupd", "movdqa", "movdqu",
-    "paddd", "psubd", "pxor", "pand", "por", "movd", "movq",
-    "cvtsi2ss", "cvtsi2sd", "cvtss2sd", "cvtsd2ss",
-    "comiss", "comisd", "ucomiss", "ucomisd",
+    "addps",
+    "addpd",
+    "addss",
+    "addsd",
+    "subps",
+    "subpd",
+    "subss",
+    "subsd",
+    "mulps",
+    "mulpd",
+    "mulss",
+    "mulsd",
+    "divps",
+    "divpd",
+    "divss",
+    "divsd",
+    "xorps",
+    "xorpd",
+    "andps",
+    "andpd",
+    "orps",
+    "orpd",
+    "sqrtps",
+    "sqrtpd",
+    "sqrtss",
+    "sqrtsd",
+    "movaps",
+    "movups",
+    "movapd",
+    "movupd",
+    "movdqa",
+    "movdqu",
+    "paddd",
+    "psubd",
+    "pxor",
+    "pand",
+    "por",
+    "movd",
+    "movq",
+    "cvtsi2ss",
+    "cvtsi2sd",
+    "cvtss2sd",
+    "cvtsd2ss",
+    "comiss",
+    "comisd",
+    "ucomiss",
+    "ucomisd",
     // AVX (hand-written)
-    "vaddps", "vaddpd", "vaddss", "vaddsd", "vsubps", "vsubpd",
-    "vmulps", "vmulpd", "vdivps", "vdivpd",
-    "vxorps", "vxorpd", "vandps", "vandpd", "vorps", "vorpd",
-    "vmovaps", "vmovups", "vmovapd", "vmovupd", "vmovdqa", "vmovdqu",
-    "vpaddd", "vpsubd", "vpxor", "vpand", "vpor",
+    "vaddps",
+    "vaddpd",
+    "vaddss",
+    "vaddsd",
+    "vsubps",
+    "vsubpd",
+    "vmulps",
+    "vmulpd",
+    "vdivps",
+    "vdivpd",
+    "vxorps",
+    "vxorpd",
+    "vandps",
+    "vandpd",
+    "vorps",
+    "vorpd",
+    "vmovaps",
+    "vmovups",
+    "vmovapd",
+    "vmovupd",
+    "vmovdqa",
+    "vmovdqu",
+    "vpaddd",
+    "vpsubd",
+    "vpxor",
+    "vpand",
+    "vpor",
     // CMOVcc (hand-written)
-    "cmovo", "cmovno", "cmovb", "cmovc", "cmovnae", "cmovae", "cmovnb", "cmovnc",
-    "cmove", "cmovz", "cmovne", "cmovnz", "cmovbe", "cmovna", "cmova", "cmovnbe",
-    "cmovs", "cmovns", "cmovp", "cmovpe", "cmovnp", "cmovpo", "cmovl", "cmovnge",
-    "cmovge", "cmovnl", "cmovle", "cmovng", "cmovg", "cmovnle",
+    "cmovo",
+    "cmovno",
+    "cmovb",
+    "cmovc",
+    "cmovnae",
+    "cmovae",
+    "cmovnb",
+    "cmovnc",
+    "cmove",
+    "cmovz",
+    "cmovne",
+    "cmovnz",
+    "cmovbe",
+    "cmovna",
+    "cmova",
+    "cmovnbe",
+    "cmovs",
+    "cmovns",
+    "cmovp",
+    "cmovpe",
+    "cmovnp",
+    "cmovpo",
+    "cmovl",
+    "cmovnge",
+    "cmovge",
+    "cmovnl",
+    "cmovle",
+    "cmovng",
+    "cmovg",
+    "cmovnle",
     // SETcc (hand-written)
-    "seto", "setno", "setb", "setc", "setnae", "setae", "setnb", "setnc",
-    "sete", "setz", "setne", "setnz", "setbe", "setna", "seta", "setnbe",
-    "sets", "setns", "setp", "setpe", "setnp", "setpo", "setl", "setnge",
-    "setge", "setnl", "setle", "setng", "setg", "setnle",
+    "seto",
+    "setno",
+    "setb",
+    "setc",
+    "setnae",
+    "setae",
+    "setnb",
+    "setnc",
+    "sete",
+    "setz",
+    "setne",
+    "setnz",
+    "setbe",
+    "setna",
+    "seta",
+    "setnbe",
+    "sets",
+    "setns",
+    "setp",
+    "setpe",
+    "setnp",
+    "setpo",
+    "setl",
+    "setnge",
+    "setge",
+    "setnl",
+    "setle",
+    "setng",
+    "setg",
+    "setnle",
     // Bit operations (hand-written)
-    "bsf", "bsr", "popcnt", "lzcnt", "tzcnt", "crc32", "bt", "bts", "btr", "btc",
+    "bsf",
+    "bsr",
+    "popcnt",
+    "lzcnt",
+    "tzcnt",
+    "crc32",
+    "bt",
+    "bts",
+    "btr",
+    "btc",
     // Rotate (hand-written)
-    "rol", "ror", "rcl", "rcr",
+    "rol",
+    "ror",
+    "rcl",
+    "rcr",
     // Single-operand GPR (hand-written)
-    "mul", "div", "idiv", "leave", "enter",
+    "mul",
+    "div",
+    "idiv",
+    "leave",
+    "enter",
     // Flag and misc operations (hand-written)
-    "clc", "stc", "cld", "std_", "cmc", "cli", "sti", "sahf", "lahf",
-    "hlt", "ud2", "cpuid", "rdtsc", "rdtscp", "pause", "lock",
-    "lfence", "mfence", "sfence", "emms", "cbw", "cwde", "cwd", "cdqe",
-    "popf", "pushf", "stmxcsr", "ldmxcsr",
+    "clc",
+    "stc",
+    "cld",
+    "std_",
+    "cmc",
+    "cli",
+    "sti",
+    "sahf",
+    "lahf",
+    "hlt",
+    "ud2",
+    "cpuid",
+    "rdtsc",
+    "rdtscp",
+    "pause",
+    "lock",
+    "lfence",
+    "mfence",
+    "sfence",
+    "emms",
+    "cbw",
+    "cwde",
+    "cwd",
+    "cdqe",
+    "popf",
+    "pushf",
+    "stmxcsr",
+    "ldmxcsr",
     // String operations (hand-written)
-    "rep", "repe", "repz", "repne", "repnz",
-    "lodsb", "lodsw", "lodsd", "lodsq",
-    "stosb", "stosw", "stosd", "stosq",
-    "movsb", "movsw", "movsd_string", "movsq",
-    "scasb", "scasw", "scasd", "scasq",
-    "cmpsb", "cmpsw", "cmpsq",
+    "rep",
+    "repe",
+    "repz",
+    "repne",
+    "repnz",
+    "lodsb",
+    "lodsw",
+    "lodsd",
+    "lodsq",
+    "stosb",
+    "stosw",
+    "stosd",
+    "stosq",
+    "movsb",
+    "movsw",
+    "movsd_string",
+    "movsq",
+    "scasb",
+    "scasw",
+    "scasd",
+    "scasq",
+    "cmpsb",
+    "cmpsw",
+    "cmpsq",
     // CMPXCHG / XADD (hand-written)
-    "cmpxchg", "xadd",
+    "cmpxchg",
+    "xadd",
     // VEX misc (hand-written)
-    "vzeroall", "vzeroupper",
+    "vzeroall",
+    "vzeroupper",
     // Non-temporal stores (hand-written)
-    "movntps", "movntpd", "movntdq", "movnti",
-    "vmovntps", "vmovntpd", "vmovntdq",
+    "movntps",
+    "movntpd",
+    "movntdq",
+    "movnti",
+    "vmovntps",
+    "vmovntpd",
+    "vmovntdq",
     // Partial register loads/stores (hand-written)
-    "movhps", "movlps", "movhpd", "movlpd",
-    "vmovhps", "vmovlps", "vmovhpd", "vmovlpd",
+    "movhps",
+    "movlps",
+    "movhpd",
+    "movlpd",
+    "vmovhps",
+    "vmovlps",
+    "vmovhpd",
+    "vmovlpd",
     // Extract scalar (hand-written)
-    "pextrb", "pextrw", "pextrd", "pextrq", "extractps",
-    "vpextrb", "vpextrw", "vpextrd", "vpextrq", "vextractps",
+    "pextrb",
+    "pextrw",
+    "pextrd",
+    "pextrq",
+    "extractps",
+    "vpextrb",
+    "vpextrw",
+    "vpextrd",
+    "vpextrq",
+    "vextractps",
     // Insert scalar (hand-written)
-    "pinsrb", "pinsrw", "pinsrd", "pinsrq", "insertps",
-    "vpinsrb", "vpinsrw", "vpinsrd", "vpinsrq", "vinsertps",
+    "pinsrb",
+    "pinsrw",
+    "pinsrd",
+    "pinsrq",
+    "insertps",
+    "vpinsrb",
+    "vpinsrw",
+    "vpinsrd",
+    "vpinsrq",
+    "vinsertps",
     // Extract vector (hand-written)
-    "vextractf128", "vextracti128",
-    "vextractf32x4", "vextracti32x4", "vextractf64x2", "vextracti64x2",
-    "vextractf32x8", "vextracti32x8", "vextractf64x4", "vextracti64x4",
+    "vextractf128",
+    "vextracti128",
+    "vextractf32x4",
+    "vextracti32x4",
+    "vextractf64x2",
+    "vextracti64x2",
+    "vextractf32x8",
+    "vextracti32x8",
+    "vextractf64x4",
+    "vextracti64x4",
     // Variable blend (hand-written)
-    "blendvps", "blendvpd", "pblendvb",
+    "blendvps",
+    "blendvpd",
+    "pblendvb",
     // Float conversion (hand-written)
     "vcvtps2ph",
     // SHLD/SHRD/BSWAP (hand-written)
-    "shld", "shrd", "bswap",
+    "shld",
+    "shrd",
+    "bswap",
     // MOVSS/MOVSD (hand-written — bidirectional)
-    "movss", "movsd", "vmovss", "vmovsd",
+    "movss",
+    "movsd",
+    "vmovss",
+    "vmovsd",
     // MOVAPS/MOVUPS already hand-written above
     // Cache prefetch (hand-written)
-    "prefetchnta", "prefetcht0", "prefetcht1", "prefetcht2",
-    "clflush", "clflushopt",
+    "prefetchnta",
+    "prefetcht0",
+    "prefetcht1",
+    "prefetcht2",
+    "clflush",
+    "clflushopt",
     // MOVMSKPS/PD (hand-written)
-    "movmskps", "movmskpd", "vmovmskps", "vmovmskpd", "vpmovmskb",
+    "movmskps",
+    "movmskpd",
+    "vmovmskps",
+    "vmovmskpd",
+    "vpmovmskb",
     // CVT scalar (hand-written)
-    "cvttss2si", "cvttsd2si", "cvtss2si", "cvtsd2si",
-    "cvtdq2ps", "cvtps2dq", "cvttps2dq",
+    "cvttss2si",
+    "cvttsd2si",
+    "cvtss2si",
+    "cvtsd2si",
+    "cvtdq2ps",
+    "cvtps2dq",
+    "cvttps2dq",
     // PUNPCK/PACK/UNPACK (hand-written)
-    "punpcklbw", "punpcklwd", "punpckldq", "punpcklqdq",
-    "punpckhbw", "punpckhwd", "punpckhdq", "punpckhqdq",
-    "packsswb", "packssdw", "packuswb", "packusdw",
-    "unpcklps", "unpckhps", "unpcklpd", "unpckhpd",
+    "punpcklbw",
+    "punpcklwd",
+    "punpckldq",
+    "punpcklqdq",
+    "punpckhbw",
+    "punpckhwd",
+    "punpckhdq",
+    "punpckhqdq",
+    "packsswb",
+    "packssdw",
+    "packuswb",
+    "packusdw",
+    "unpcklps",
+    "unpckhps",
+    "unpcklpd",
+    "unpckhpd",
     // PSLL/PSRL/PSRA immediate shifts (hand-written, suffixed _imm)
-    "pslld_imm", "psllq_imm", "psrld_imm", "psrlq_imm", "psrad_imm",
-    "psllw_imm", "psrlw_imm", "psraw_imm",
+    "pslld_imm",
+    "psllq_imm",
+    "psrld_imm",
+    "psrlq_imm",
+    "psrad_imm",
+    "psllw_imm",
+    "psrlw_imm",
+    "psraw_imm",
     // PSLLDQ/PSRLDQ byte shifts (hand-written)
-    "pslldq", "psrldq",
+    "pslldq",
+    "psrldq",
     // Opmask (k-register) instructions (hand-written)
-    "kmovw", "kmovb", "kmovd", "kmovq",
-    "kandw", "kandb", "kandd", "kandq",
-    "kandnw", "kandnb", "kandnd", "kandnq",
-    "korw", "korb", "kord", "korq",
-    "kxorw", "kxorb", "kxord", "kxorq",
-    "kxnorw", "kxnorb", "kxnord", "kxnorq",
-    "kaddw", "kaddb", "kaddd", "kaddq",
-    "knotw", "knotb", "knotd", "knotq",
-    "kortestw", "kortestb", "kortestd", "kortestq",
-    "ktestw", "ktestb", "ktestd", "ktestq",
-    "kunpckbw", "kunpckwd", "kunpckdq",
-    "kshiftlw", "kshiftlb", "kshiftld", "kshiftlq",
-    "kshiftrw", "kshiftrb", "kshiftrd", "kshiftrq",
+    "kmovw",
+    "kmovb",
+    "kmovd",
+    "kmovq",
+    "kandw",
+    "kandb",
+    "kandd",
+    "kandq",
+    "kandnw",
+    "kandnb",
+    "kandnd",
+    "kandnq",
+    "korw",
+    "korb",
+    "kord",
+    "korq",
+    "kxorw",
+    "kxorb",
+    "kxord",
+    "kxorq",
+    "kxnorw",
+    "kxnorb",
+    "kxnord",
+    "kxnorq",
+    "kaddw",
+    "kaddb",
+    "kaddd",
+    "kaddq",
+    "knotw",
+    "knotb",
+    "knotd",
+    "knotq",
+    "kortestw",
+    "kortestb",
+    "kortestd",
+    "kortestq",
+    "ktestw",
+    "ktestb",
+    "ktestd",
+    "ktestq",
+    "kunpckbw",
+    "kunpckwd",
+    "kunpckdq",
+    "kshiftlw",
+    "kshiftlb",
+    "kshiftld",
+    "kshiftlq",
+    "kshiftrw",
+    "kshiftrb",
+    "kshiftrd",
+    "kshiftrq",
     // x87 FPU instructions (hand-written)
-    "fld", "fst", "fstp", "fild", "fist", "fistp", "fisttp",
-    "fadd", "fsub", "fsubr", "fmul", "fdiv", "fdivr",
-    "faddp", "fsubp", "fsubrp", "fmulp", "fdivp", "fdivrp",
-    "fcom", "fcomp", "fcompp", "fucom", "fucomp", "fucompp",
-    "fucomi", "fucomip", "fcomi", "fcomip",
-    "fchs", "fabs", "fsqrt", "fsin", "fcos", "fptan", "fpatan",
-    "frndint", "fscale", "f2xm1", "fyl2x", "fyl2xp1",
-    "fprem", "fprem1", "fxtract", "ftst", "fxam",
-    "fxch", "fldz", "fld1", "fldpi", "fldl2t", "fldl2e", "fldlg2", "fldln2",
-    "fwait", "finit", "fninit", "fldcw", "fnstcw", "fstcw",
-    "fnstsw", "fstsw", "fclex", "fnclex", "fnop", "fdecstp", "fincstp", "ffree",
-    "fiadd", "fisub", "fimul", "fidiv", "ficom", "ficomp",
-    "fcmovb", "fcmove", "fcmovbe", "fcmovu",
-    "fcmovnb", "fcmovne", "fcmovnbe", "fcmovnu",
+    "fld",
+    "fst",
+    "fstp",
+    "fild",
+    "fist",
+    "fistp",
+    "fisttp",
+    "fadd",
+    "fsub",
+    "fsubr",
+    "fmul",
+    "fdiv",
+    "fdivr",
+    "faddp",
+    "fsubp",
+    "fsubrp",
+    "fmulp",
+    "fdivp",
+    "fdivrp",
+    "fcom",
+    "fcomp",
+    "fcompp",
+    "fucom",
+    "fucomp",
+    "fucompp",
+    "fucomi",
+    "fucomip",
+    "fcomi",
+    "fcomip",
+    "fchs",
+    "fabs",
+    "fsqrt",
+    "fsin",
+    "fcos",
+    "fptan",
+    "fpatan",
+    "frndint",
+    "fscale",
+    "f2xm1",
+    "fyl2x",
+    "fyl2xp1",
+    "fprem",
+    "fprem1",
+    "fxtract",
+    "ftst",
+    "fxam",
+    "fxch",
+    "fldz",
+    "fld1",
+    "fldpi",
+    "fldl2t",
+    "fldl2e",
+    "fldlg2",
+    "fldln2",
+    "fwait",
+    "finit",
+    "fninit",
+    "fldcw",
+    "fnstcw",
+    "fstcw",
+    "fnstsw",
+    "fstsw",
+    "fclex",
+    "fnclex",
+    "fnop",
+    "fdecstp",
+    "fincstp",
+    "ffree",
+    "fiadd",
+    "fisub",
+    "fimul",
+    "fidiv",
+    "ficom",
+    "ficomp",
+    "fcmovb",
+    "fcmove",
+    "fcmovbe",
+    "fcmovu",
+    "fcmovnb",
+    "fcmovne",
+    "fcmovnbe",
+    "fcmovnu",
     // AMX tile instructions (hand-written)
-    "tilerelease", "tilezero",
-    "tdpbssd", "tdpbsud", "tdpbusd", "tdpbuud",
-    "tdpbf16ps", "tdpfp16ps",
-    "tileloadd", "tileloaddt1", "tilestored",
-    "ldtilecfg", "sttilecfg",
+    "tilerelease",
+    "tilezero",
+    "tdpbssd",
+    "tdpbsud",
+    "tdpbusd",
+    "tdpbuud",
+    "tdpbf16ps",
+    "tdpfp16ps",
+    "tileloadd",
+    "tileloaddt1",
+    "tilestored",
+    "ldtilecfg",
+    "sttilecfg",
 ];
 
 /// Rust keywords and identifiers that need an underscore suffix.
-const RUST_KEYWORDS: &[&str] = &["and", "or", "not", "xor", "in", "loop", "mod", "ref", "type", "yield"];
+const RUST_KEYWORDS: &[&str] = &[
+    "and", "or", "not", "xor", "in", "loop", "mod", "ref", "type", "yield",
+];
 
 /// Sanitize a mnemonic name for use as a Rust identifier.
 fn sanitize_name(name: &str) -> String {
@@ -275,66 +687,129 @@ pub fn generate<W: Write>(out: &mut W, tables: &[&[Insn]]) -> std::io::Result<()
                 Pattern::Sse => {
                     writeln!(out, "    /// `{} xmm, xmm/m`", insn.name)?;
                     writeln!(out, "    pub fn {}(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.buf.op_sse(&dst, &src.into(), {}, 0x{:02X}, None)", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.buf.op_sse(&dst, &src.into(), {}, 0x{:02X}, None)",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::SseImm => {
                     writeln!(out, "    /// `{} xmm, xmm/m, imm8`", insn.name)?;
                     writeln!(out, "    pub fn {}(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.buf.op_sse(&dst, &src.into(), {}, 0x{:02X}, Some(imm))", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.buf.op_sse(&dst, &src.into(), {}, 0x{:02X}, Some(imm))",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::AvxXXXm => {
-                    writeln!(out, "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm, xmm/ymm/zmm/m`", insn.name)?;
+                    writeln!(
+                        out,
+                        "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm, xmm/ymm/zmm/m`",
+                        insn.name
+                    )?;
                     writeln!(out, "    pub fn {}(&mut self, x1: Reg, x2: Reg, op: impl Into<RegMem>) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.op_avx_x_x_xm(x1, x2, op, {}, 0x{:02X}, None)", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.op_avx_x_x_xm(x1, x2, op, {}, 0x{:02X}, None)",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::AvxXXXmImm => {
-                    writeln!(out, "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`", insn.name)?;
+                    writeln!(
+                        out,
+                        "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`",
+                        insn.name
+                    )?;
                     writeln!(out, "    pub fn {}(&mut self, x1: Reg, x2: Reg, op: impl Into<RegMem>, imm: u8) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.op_avx_x_x_xm(x1, x2, op, {}, 0x{:02X}, Some(imm))", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.op_avx_x_x_xm(x1, x2, op, {}, 0x{:02X}, Some(imm))",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::AvxKXXm => {
                     writeln!(out, "    /// `{} k, xmm/ymm/zmm, xmm/ymm/zmm/m`", insn.name)?;
                     writeln!(out, "    pub fn {}(&mut self, k: Reg, x2: Reg, op: impl Into<RegMem>) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.op_avx_k_x_xm(k, x2, op, {}, 0x{:02X}, None)", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.op_avx_k_x_xm(k, x2, op, {}, 0x{:02X}, None)",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::AvxKXXmImm => {
-                    writeln!(out, "    /// `{} k, xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`", insn.name)?;
+                    writeln!(
+                        out,
+                        "    /// `{} k, xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`",
+                        insn.name
+                    )?;
                     writeln!(out, "    pub fn {}(&mut self, k: Reg, x2: Reg, op: impl Into<RegMem>, imm: u8) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.op_avx_k_x_xm(k, x2, op, {}, 0x{:02X}, Some(imm))", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.op_avx_k_x_xm(k, x2, op, {}, 0x{:02X}, Some(imm))",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::VexXXm => {
                     writeln!(out, "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm/m`", insn.name)?;
                     writeln!(out, "    pub fn {}(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.buf.op_vex(&dst, None, &src.into(), {}, 0x{:02X}, None)", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.buf.op_vex(&dst, None, &src.into(), {}, 0x{:02X}, None)",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::VexXXmImm => {
-                    writeln!(out, "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`", insn.name)?;
+                    writeln!(
+                        out,
+                        "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`",
+                        insn.name
+                    )?;
                     writeln!(out, "    pub fn {}(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {{", name)?;
-                    writeln!(out, "        self.buf.op_vex(&dst, None, &src.into(), {}, 0x{:02X}, Some(imm))", flags, opcode)?;
+                    writeln!(
+                        out,
+                        "        self.buf.op_vex(&dst, None, &src.into(), {}, 0x{:02X}, Some(imm))",
+                        flags, opcode
+                    )?;
                     writeln!(out, "    }}")?;
                 }
                 Pattern::VexMov => {
                     let store_opcode = insn.store_opcode;
-                    writeln!(out, "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm/m` or `{0} m, xmm/ymm/zmm`", insn.name)?;
+                    writeln!(
+                        out,
+                        "    /// `{} xmm/ymm/zmm, xmm/ymm/zmm/m` or `{0} m, xmm/ymm/zmm`",
+                        insn.name
+                    )?;
                     writeln!(out, "    pub fn {}(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMem>) -> Result<()> {{", name)?;
                     writeln!(out, "        let dst = dst.into();")?;
                     writeln!(out, "        let src = src.into();")?;
                     writeln!(out, "        let type_ = {}; ", flags)?;
                     writeln!(out, "        match (&dst, &src) {{")?;
                     writeln!(out, "            (RegMem::Reg(d), _) => {{")?;
-                    writeln!(out, "                self.buf.op_vex(d, None, &src, type_, 0x{:02X}, None)", opcode)?;
+                    writeln!(
+                        out,
+                        "                self.buf.op_vex(d, None, &src, type_, 0x{:02X}, None)",
+                        opcode
+                    )?;
                     writeln!(out, "            }}")?;
                     writeln!(out, "            (RegMem::Mem(_), RegMem::Reg(s)) => {{")?;
-                    writeln!(out, "                self.buf.op_vex(s, None, &dst, type_, 0x{:02X}, None)", store_opcode)?;
+                    writeln!(
+                        out,
+                        "                self.buf.op_vex(s, None, &dst, type_, 0x{:02X}, None)",
+                        store_opcode
+                    )?;
                     writeln!(out, "            }}")?;
-                    writeln!(out, "            _ => Err(crate::error::Error::BadCombination),")?;
+                    writeln!(
+                        out,
+                        "            _ => Err(crate::error::Error::BadCombination),"
+                    )?;
                     writeln!(out, "        }}")?;
                     writeln!(out, "    }}")?;
                 }
@@ -348,8 +823,11 @@ pub fn generate<W: Write>(out: &mut W, tables: &[&[Insn]]) -> std::io::Result<()
     writeln!(out)?;
 
     // Write a summary as a comment
-    writeln!(out, "// Generated {} methods ({} skipped as hand-written, {} skipped as duplicate)",
-             generated_count, skipped_count, duplicate_count)?;
+    writeln!(
+        out,
+        "// Generated {} methods ({} skipped as hand-written, {} skipped as duplicate)",
+        generated_count, skipped_count, duplicate_count
+    )?;
 
     Ok(())
 }

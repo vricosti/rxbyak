@@ -29,9 +29,7 @@ fn main() -> Result<()> {
         rxbyak::platform::protect(buf_ptr, BUF_SIZE, rxbyak::platform::ProtectMode::ReadExec)?;
     }
 
-    let add_fn: fn(i64, i64) -> i64 = unsafe {
-        std::mem::transmute(buf_ptr)
-    };
+    let add_fn: fn(i64, i64) -> i64 = unsafe { std::mem::transmute(buf_ptr) };
 
     let mut sum: i64 = 0;
     for i in 0..10 {

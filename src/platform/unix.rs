@@ -1,5 +1,5 @@
-use crate::error::{Error, Result};
 use super::ProtectMode;
+use crate::error::{Error, Result};
 
 pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     // Allocate as RWX matching upstream dynarmic behavior when

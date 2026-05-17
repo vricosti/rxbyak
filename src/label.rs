@@ -44,7 +44,9 @@ pub struct Label {
 }
 
 impl Label {
-    pub fn id(&self) -> LabelId { self.id }
+    pub fn id(&self) -> LabelId {
+        self.id
+    }
 }
 
 /// Definition of a label (offset into code buffer).
@@ -248,7 +250,9 @@ impl LabelManager {
 }
 
 impl Default for LabelManager {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

@@ -71,14 +71,16 @@ impl CodeBuffer {
     /// - `max_size`: Initial capacity (default 4096).
     /// - `mode`: Allocation mode.
     pub fn new(max_size: usize, mode: AllocMode) -> Result<Self> {
-        let cap = if max_size == 0 { DEFAULT_MAX_SIZE } else { max_size };
+        let cap = if max_size == 0 {
+            DEFAULT_MAX_SIZE
+        } else {
+            max_size
+        };
         let ptr = match mode {
             AllocMode::UserBuf => {
                 return Err(Error::BadParameter);
             }
-            AllocMode::Alloc | AllocMode::AutoGrow => {
-                platform::alloc_exec_mem(cap)?
-            }
+            AllocMode::Alloc | AllocMode::AutoGrow => platform::alloc_exec_mem(cap)?,
         };
         Ok(Self {
             ptr,
@@ -106,16 +108,24 @@ impl CodeBuffer {
     }
 
     /// Get allocation mode.
-    pub fn alloc_mode(&self) -> AllocMode { self.mode }
+    pub fn alloc_mode(&self) -> AllocMode {
+        self.mode
+    }
 
     /// Get current code size (bytes written).
-    pub fn size(&self) -> usize { self.size }
+    pub fn size(&self) -> usize {
+        self.size
+    }
 
     /// Get buffer capacity.
-    pub fn capacity(&self) -> usize { self.capacity }
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
 
     /// Get pointer to start of code buffer.
-    pub fn top(&self) -> *const u8 { self.ptr }
+    pub fn top(&self) -> *const u8 {
+        self.ptr
+    }
 
     /// Get pointer to current write position.
     pub fn cur(&self) -> *const u8 {
@@ -123,28 +133,40 @@ impl CodeBuffer {
     }
 
     /// Whether AutoGrow jump addresses have been calculated.
-    pub fn is_calc_jmp_called(&self) -> bool { self.calc_jmp_called }
+    pub fn is_calc_jmp_called(&self) -> bool {
+        self.calc_jmp_called
+    }
 
     /// Set the calc_jmp_called flag.
-    pub fn set_calc_jmp_called(&mut self, v: bool) { self.calc_jmp_called = v; }
+    pub fn set_calc_jmp_called(&mut self, v: bool) {
+        self.calc_jmp_called = v;
+    }
 
     /// Reset the code size to zero.
-    pub fn reset_size(&mut self) { self.size = 0; }
+    pub fn reset_size(&mut self) {
+        self.size = 0;
+    }
 
     /// Set the code size directly.
-    pub fn set_size(&mut self, size: usize) { self.size = size; }
+    pub fn set_size(&mut self, size: usize) {
+        self.size = size;
+    }
 
     /// Emit a single byte.
+    #[inline(always)]
     pub fn db(&mut self, byte: u8) -> Result<()> {
         if self.size >= self.capacity {
             self.grow()?;
         }
-        unsafe { *self.ptr.add(self.size) = byte; }
+        unsafe {
+            *self.ptr.add(self.size) = byte;
+        }
         self.size += 1;
         Ok(())
     }
 
     /// Emit a slice of bytes.
+    #[inline(always)]
     pub fn db_slice(&mut self, bytes: &[u8]) -> Result<()> {
         for &b in bytes {
             self.db(b)?;
@@ -153,6 +175,7 @@ impl CodeBuffer {
     }
 
     /// Emit N bytes from a u64 (little-endian).
+    #[inline(always)]
     pub fn db_n(&mut self, code: u64, n: usize) -> Result<()> {
         let bytes = code.to_le_bytes();
         for &b in &bytes[..n] {
@@ -162,16 +185,19 @@ impl CodeBuffer {
     }
 
     /// Emit a 16-bit word (little-endian).
+    #[inline(always)]
     pub fn dw(&mut self, v: u16) -> Result<()> {
         self.db_n(v as u64, 2)
     }
 
     /// Emit a 32-bit dword (little-endian).
+    #[inline(always)]
     pub fn dd(&mut self, v: u32) -> Result<()> {
         self.db_n(v as u64, 4)
     }
 
     /// Emit a 64-bit qword (little-endian).
+    #[inline(always)]
     pub fn dq(&mut self, v: u64) -> Result<()> {
         self.db_n(v, 8)
     }
@@ -180,7 +206,9 @@ impl CodeBuffer {
     pub fn rewrite(&mut self, offset: usize, val: u64, size: usize) {
         let bytes = val.to_le_bytes();
         for i in 0..size {
-            unsafe { *self.ptr.add(offset + i) = bytes[i]; }
+            unsafe {
+                *self.ptr.add(offset + i) = bytes[i];
+            }
         }
     }
 
@@ -196,13 +224,17 @@ impl CodeBuffer {
 
     /// Calculate jump addresses for AutoGrow mode.
     pub fn calc_jmp_address(&mut self) -> Result<()> {
-        if self.calc_jmp_called { return Ok(()); }
+        if self.calc_jmp_called {
+            return Ok(());
+        }
         for info in &self.addr_info_list {
             let val = info.get_val(self.ptr)?;
             let bytes = val.to_le_bytes();
             let n = info.jmp_size as usize;
             for i in 0..n {
-                unsafe { *self.ptr.add(info.code_offset + i) = bytes[i]; }
+                unsafe {
+                    *self.ptr.add(info.code_offset + i) = bytes[i];
+                }
             }
         }
         self.calc_jmp_called = true;
@@ -211,19 +243,25 @@ impl CodeBuffer {
 
     /// Set memory protection to Read+Execute.
     pub fn protect_rx(&mut self) -> Result<()> {
-        if self.mode == AllocMode::UserBuf { return Ok(()); }
+        if self.mode == AllocMode::UserBuf {
+            return Ok(());
+        }
         unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadExec) }
     }
 
     /// Set memory protection to Read+Write.
     pub fn protect_rw(&mut self) -> Result<()> {
-        if self.mode == AllocMode::UserBuf { return Ok(()); }
+        if self.mode == AllocMode::UserBuf {
+            return Ok(());
+        }
         unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWrite) }
     }
 
     /// Set memory protection to Read+Write+Execute.
     pub fn protect_rwe(&mut self) -> Result<()> {
-        if self.mode == AllocMode::UserBuf { return Ok(()); }
+        if self.mode == AllocMode::UserBuf {
+            return Ok(());
+        }
         unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWriteExec) }
     }
 

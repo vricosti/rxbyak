@@ -1,5 +1,4 @@
 /// AVX-512 (EVEX) instruction tests validated against NASM reference assembler.
-
 mod common;
 
 use common::*;
@@ -52,7 +51,10 @@ fn test_nasm_evex_basic_float() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -80,7 +82,10 @@ fn test_nasm_evex_int_ops() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -113,7 +118,10 @@ fn test_nasm_evex_only_int() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -130,22 +138,25 @@ fn test_nasm_evex_opmask() {
     // vpaddd zmm{k1}, zmm, zmm
     for k in 1u8..=7 {
         let asm_text = format!("vpaddd zmm0{{k{}}}, zmm1, zmm2", k);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.vpaddd(ZMM0.k(k), ZMM1, ZMM2)
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vpaddd(ZMM0.k(k), ZMM1, ZMM2)),
+        ));
     }
 
     // vaddps zmm{k1}, zmm, zmm
     let asm_text = "vaddps zmm0{k1}, zmm1, zmm2".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0.k(1), ZMM1, ZMM2)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0.k(1), ZMM1, ZMM2)),
+    ));
 
     // With extended registers and mask
     let asm_text = "vaddps zmm8{k2}, zmm9, zmm10".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM8.k(2), ZMM9, ZMM10)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM8.k(2), ZMM9, ZMM10)),
+    ));
 
     compare_nasm_batch(&nasm, 64, insns);
 }
@@ -159,33 +170,38 @@ fn test_nasm_evex_zeroing() {
 
     // vpaddd zmm{k1}{z}, zmm, zmm
     let asm_text = "vpaddd zmm0{k1}{z}, zmm1, zmm2".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vpaddd(ZMM0.k(1).z(), ZMM1, ZMM2)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vpaddd(ZMM0.k(1).z(), ZMM1, ZMM2)),
+    ));
 
     // vaddps zmm{k1}{z}, zmm, zmm
     let asm_text = "vaddps zmm0{k1}{z}, zmm1, zmm2".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0.k(1).z(), ZMM1, ZMM2)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0.k(1).z(), ZMM1, ZMM2)),
+    ));
 
     // Extended regs with zeroing
     let asm_text = "vaddps zmm8{k2}{z}, zmm9, zmm10".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM8.k(2).z(), ZMM9, ZMM10)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM8.k(2).z(), ZMM9, ZMM10)),
+    ));
 
     let asm_text = "vsubps zmm15{k3}{z}, zmm14, zmm13".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vsubps(ZMM15.k(3).z(), ZMM14, ZMM13)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vsubps(ZMM15.k(3).z(), ZMM14, ZMM13)),
+    ));
 
     // Multiple mask values with zeroing
     for k in 1u8..=7 {
         let asm_text = format!("vaddpd zmm0{{k{}}}, zmm1, zmm2", k);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.vaddpd(ZMM0.k(k), ZMM1, ZMM2)
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vaddpd(ZMM0.k(k), ZMM1, ZMM2)),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);
@@ -209,12 +225,18 @@ fn test_nasm_evex_extended_regs() {
 
     for &(d, dn, s1, s1n, s2, s2n) in triples {
         let asm_text = format!("vaddps {}, {}, {}", dn, s1n, s2n);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.vaddps(d, s1, s2))));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vaddps(d, s1, s2)),
+        ));
     }
 
     for &(d, dn, s1, s1n, s2, s2n) in triples {
         let asm_text = format!("vpaddd {}, {}, {}", dn, s1n, s2n);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.vpaddd(d, s1, s2))));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vpaddd(d, s1, s2)),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);
@@ -243,7 +265,10 @@ fn test_nasm_evex_mov() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -260,16 +285,18 @@ fn test_nasm_evex_vpternlog() {
     let imm_values: &[u8] = &[0x00, 0xFF, 0xDB, 0x96];
     for &imm in imm_values {
         let asm_text = format!("vpternlogd zmm0, zmm1, zmm2, 0x{:x}", imm);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.vpternlogd(ZMM0, ZMM1, ZMM2, imm)
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vpternlogd(ZMM0, ZMM1, ZMM2, imm)),
+        ));
     }
 
     for &imm in imm_values {
         let asm_text = format!("vpternlogq zmm0, zmm1, zmm2, 0x{:x}", imm);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.vpternlogq(ZMM0, ZMM1, ZMM2, imm)
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vpternlogq(ZMM0, ZMM1, ZMM2, imm)),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);
@@ -284,33 +311,38 @@ fn test_nasm_evex_broadcast() {
 
     // vpaddd zmm0, zmm1, dword [rax]{1to16}
     let asm_text = "vpaddd zmm0, zmm1, dword [rax]{1to16}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vpaddd(ZMM0, ZMM1, broadcast_ptr(32, RAX.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vpaddd(ZMM0, ZMM1, broadcast_ptr(32, RAX.into()))),
+    ));
 
     // vaddps zmm0, zmm1, dword [rax]{1to16}
     let asm_text = "vaddps zmm0, zmm1, dword [rax]{1to16}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, broadcast_ptr(32, RAX.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, broadcast_ptr(32, RAX.into()))),
+    ));
 
     // vaddpd zmm0, zmm1, qword [rax]{1to8}
     let asm_text = "vaddpd zmm0, zmm1, qword [rax]{1to8}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddpd(ZMM0, ZMM1, broadcast_ptr(64, RAX.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddpd(ZMM0, ZMM1, broadcast_ptr(64, RAX.into()))),
+    ));
 
     // With extended base register
     let asm_text = "vpaddd zmm0, zmm1, dword [r8]{1to16}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vpaddd(ZMM0, ZMM1, broadcast_ptr(32, R8.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vpaddd(ZMM0, ZMM1, broadcast_ptr(32, R8.into()))),
+    ));
 
     // With displacement
     let asm_text = "vpaddd zmm0, zmm1, dword [rax+0x10]{1to16}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vpaddd(ZMM0, ZMM1, broadcast_ptr(32, RAX + 0x10))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vpaddd(ZMM0, ZMM1, broadcast_ptr(32, RAX + 0x10))),
+    ));
 
     compare_nasm_batch(&nasm, 64, insns);
 }
@@ -324,45 +356,54 @@ fn test_nasm_evex_rounding() {
 
     // vaddps zmm0, zmm1, zmm2, {rn-sae}
     let asm_text = "vaddps zmm0, zmm1, zmm2, {rn-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae))),
+    ));
 
     // vaddps zmm0, zmm1, zmm2, {rd-sae}
     let asm_text = "vaddps zmm0, zmm1, zmm2, {rd-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RdSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RdSae))),
+    ));
 
     // vaddps zmm0, zmm1, zmm2, {ru-sae}
     let asm_text = "vaddps zmm0, zmm1, zmm2, {ru-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RuSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RuSae))),
+    ));
 
     // vaddps zmm0, zmm1, zmm2, {rz-sae}
     let asm_text = "vaddps zmm0, zmm1, zmm2, {rz-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RzSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RzSae))),
+    ));
 
     // vaddpd with rounding
     let asm_text = "vaddpd zmm0, zmm1, zmm2, {rn-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddpd(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddpd(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae))),
+    ));
 
     // Combined: mask + rounding
     let asm_text = "vaddps zmm0{k1}, zmm1, zmm2, {rn-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0.k(1), ZMM1, ZMM2.rounding(Rounding::RnSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0.k(1), ZMM1, ZMM2.rounding(Rounding::RnSae))),
+    ));
 
     // Combined: mask + zeroing + rounding
     let asm_text = "vaddps zmm0{k1}{z}, zmm1, zmm2, {rz-sae}".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0.k(1).z(), ZMM1, ZMM2.rounding(Rounding::RzSae))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| {
+            a.vaddps(ZMM0.k(1).z(), ZMM1, ZMM2.rounding(Rounding::RzSae))
+        }),
+    ));
 
     compare_nasm_batch(&nasm, 64, insns);
 }
@@ -376,31 +417,36 @@ fn test_nasm_evex_mem() {
 
     // vaddps zmm, zmm, [mem]
     let asm_text = "vaddps zmm0, zmm1, zword [rax]".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, zmmword_ptr(RAX.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, zmmword_ptr(RAX.into()))),
+    ));
 
     let asm_text = "vaddps zmm0, zmm1, zword [rax+0x40]".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM0, ZMM1, zmmword_ptr(RAX + 0x40))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM0, ZMM1, zmmword_ptr(RAX + 0x40))),
+    ));
 
     let asm_text = "vaddps zmm8, zmm9, zword [r8]".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vaddps(ZMM8, ZMM9, zmmword_ptr(R8.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vaddps(ZMM8, ZMM9, zmmword_ptr(R8.into()))),
+    ));
 
     // vmovdqa32 zmm, [mem]
     let asm_text = "vmovdqa32 zmm0, zword [rax]".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vmovdqa32(ZMM0, zmmword_ptr(RAX.into()))
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vmovdqa32(ZMM0, zmmword_ptr(RAX.into()))),
+    ));
 
     // vmovdqa32 [mem], zmm
     let asm_text = "vmovdqa32 zword [rax], zmm0".to_string();
-    insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-        a.vmovdqa32(zmmword_ptr(RAX.into()), ZMM0)
-    })));
+    insns.push((
+        asm_text,
+        Box::new(|a: &mut CodeAssembler| a.vmovdqa32(zmmword_ptr(RAX.into()), ZMM0)),
+    ));
 
     compare_nasm_batch(&nasm, 64, insns);
 }
@@ -423,12 +469,18 @@ fn test_nasm_evex_fma() {
 
     for &(mnemonic, method) in ops {
         let asm_text = format!("{} zmm0, zmm1, zmm2", mnemonic);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, ZMM0, ZMM1, ZMM2))));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| method(a, ZMM0, ZMM1, ZMM2)),
+        ));
     }
 
     for &(mnemonic, method) in ops {
         let asm_text = format!("{} zmm16, zmm17, zmm18", mnemonic);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, ZMM16, ZMM17, ZMM18))));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| method(a, ZMM16, ZMM17, ZMM18)),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);

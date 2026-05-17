@@ -25,21 +25,36 @@ pub(crate) fn is_in_int32(v: u64) -> bool {
 #[inline]
 pub(crate) fn rex_rxb(bit: u32, bit3: bool, r: &Reg, b: &Reg, x: &Reg) -> u8 {
     let mut v: u8 = if bit3 { 8 } else { 0 };
-    if r.has_idx_bit(bit) { v |= 4; }
-    if x.has_idx_bit(bit) { v |= 2; }
-    if b.has_idx_bit(bit) { v |= 1; }
+    if r.has_idx_bit(bit) {
+        v |= 4;
+    }
+    if x.has_idx_bit(bit) {
+        v |= 2;
+    }
+    if b.has_idx_bit(bit) {
+        v |= 1;
+    }
     v
 }
 
 /// Encoding helper methods on CodeBuffer.
 impl CodeBuffer {
     /// Emit ModR/M byte: `(mod << 6) | ((r1 & 7) << 3) | (r2 & 7)`.
+    #[inline]
     pub(crate) fn set_modrm(&mut self, mod_: u8, r1: u8, r2: u8) -> Result<()> {
         self.db((mod_ << 6) | ((r1 & 7) << 3) | (r2 & 7))
     }
 
     /// Emit REX2 prefix (0xD5 + payload).
-    pub(crate) fn emit_rex2(&mut self, bit3: bool, rex4bit: u8, r: &Reg, b: &Reg, x: &Reg) -> Result<()> {
+    #[inline]
+    pub(crate) fn emit_rex2(
+        &mut self,
+        bit3: bool,
+        rex4bit: u8,
+        r: &Reg,
+        b: &Reg,
+        x: &Reg,
+    ) -> Result<()> {
         self.db(0xD5)?;
         self.db((rex_rxb(4, bit3, r, b, x) << 4) | rex4bit)
     }
@@ -47,27 +62,44 @@ impl CodeBuffer {
     /// Emit REX prefix. Returns true if REX2 was emitted instead.
     ///
     /// Handles legacy prefixes (0x66, 0xF2, 0xF3) and the REX/REX2 prefix.
+    #[inline]
     pub(crate) fn emit_rex_for_reg_reg(
         &mut self,
         r1: &Reg,
         r2: &Reg,
         type_: TypeFlags,
     ) -> Result<bool> {
-        if r1.get_nf() || r2.get_nf() { return Err(Error::InvalidNf); }
-        if r1.get_zu() || r2.get_zu() { return Err(Error::InvalidZu); }
+        if r1.get_nf() || r2.get_nf() {
+            return Err(Error::InvalidNf);
+        }
+        if r1.get_zu() || r2.get_zu() {
+            return Err(Error::InvalidZu);
+        }
 
         // 16-bit prefix
         let p66 = (r1.is_bit(16) && !(r2.is_bit(32) || r2.is_bit(64)))
             || (r2.is_bit(16) && !(r1.is_bit(32) || r1.is_bit(64)));
-        if type_.contains(TypeFlags::T_66) || p66 { self.db(0x66)?; }
-        if type_.contains(TypeFlags::T_F2) { self.db(0xF2)?; }
-        if type_.contains(TypeFlags::T_F3) { self.db(0xF3)?; }
+        if type_.contains(TypeFlags::T_66) || p66 {
+            self.db(0x66)?;
+        }
+        if type_.contains(TypeFlags::T_F2) {
+            self.db(0xF2)?;
+        }
+        if type_.contains(TypeFlags::T_F3) {
+            self.db(0xF3)?;
+        }
 
         let is0f = type_.intersects(TypeFlags::T_0F);
         let default_reg = Reg::default();
 
         // reg, reg encoding: ModRM(r2, r1)
-        let rex = rex_rxb(3, r1.is_reg_bit(64) || r2.is_reg_bit(64), r2, r1, &default_reg);
+        let rex = rex_rxb(
+            3,
+            r1.is_reg_bit(64) || r2.is_reg_bit(64),
+            r2,
+            r1,
+            &default_reg,
+        );
         if r1.has_rex2() || r2.has_rex2() {
             if type_.intersects(TypeFlags::T_0F38 | TypeFlags::T_0F3A) {
                 return Err(Error::CantUseRex2);
@@ -80,25 +112,39 @@ impl CodeBuffer {
         } else {
             0
         };
-        if final_rex != 0 { self.db(final_rex)?; }
+        if final_rex != 0 {
+            self.db(final_rex)?;
+        }
         Ok(false)
     }
 
     /// Emit REX prefix for reg+address. Returns true if REX2 was emitted.
+    #[inline]
     pub(crate) fn emit_rex_for_reg_mem(
         &mut self,
         r: &Reg,
         addr: &Address,
         type_: TypeFlags,
     ) -> Result<bool> {
-        if r.get_nf() { return Err(Error::InvalidNf); }
-        if r.get_zu() { return Err(Error::InvalidZu); }
+        if r.get_nf() {
+            return Err(Error::InvalidNf);
+        }
+        if r.get_zu() {
+            return Err(Error::InvalidZu);
+        }
 
-        let p66 = (r.is_bit(16) && addr.get_bit() > 0 && !(addr.get_bit() == 32 || addr.get_bit() == 64))
-            || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
-        if type_.contains(TypeFlags::T_66) || p66 { self.db(0x66)?; }
-        if type_.contains(TypeFlags::T_F2) { self.db(0xF2)?; }
-        if type_.contains(TypeFlags::T_F3) { self.db(0xF3)?; }
+        let p66 =
+            (r.is_bit(16) && addr.get_bit() > 0 && !(addr.get_bit() == 32 || addr.get_bit() == 64))
+                || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
+        if type_.contains(TypeFlags::T_66) || p66 {
+            self.db(0x66)?;
+        }
+        if type_.contains(TypeFlags::T_F2) {
+            self.db(0xF2)?;
+        }
+        if type_.contains(TypeFlags::T_F3) {
+            self.db(0xF3)?;
+        }
 
         let is0f = type_.intersects(TypeFlags::T_0F);
         let exp = addr.get_reg_exp();
@@ -106,7 +152,9 @@ impl CodeBuffer {
         let idx = exp.get_index();
 
         // 32-bit address in 64-bit mode
-        if addr.is_32bit() { self.db(0x67)?; }
+        if addr.is_32bit() {
+            self.db(0x67)?;
+        }
 
         let rex = rex_rxb(3, r.is_reg_bit(64), r, base, idx);
         if r.has_rex2() || addr.has_rex2() {
@@ -121,7 +169,9 @@ impl CodeBuffer {
         } else {
             0
         };
-        if final_rex != 0 { self.db(final_rex)?; }
+        if final_rex != 0 {
+            self.db(final_rex)?;
+        }
         Ok(false)
     }
 
@@ -129,6 +179,7 @@ impl CodeBuffer {
     ///
     /// Handles 0x0F, 0x0F38, 0x0F3A prefix bytes.
     /// Also handles T_CODE1_IF1 (OR code with 1 if register is not 8-bit).
+    #[inline]
     pub(crate) fn write_code(
         &mut self,
         type_: TypeFlags,
@@ -160,6 +211,7 @@ impl CodeBuffer {
     }
 
     /// Emit SIB addressing (ModRM + optional SIB + displacement).
+    #[inline]
     pub(crate) fn emit_sib(&mut self, addr: &Address, reg: u8) -> Result<()> {
         let exp = addr.get_reg_exp();
         let disp64 = exp.get_disp();
@@ -179,12 +231,18 @@ impl CodeBuffer {
         let disp8n = addr.disp8n;
 
         // Determine mod field
-        let mod_ = if base_bit == 0 || ((base_idx & 7) != 5 && disp == 0 && addr.get_label_id().is_none()) {
+        let mod_ = if base_bit == 0
+            || ((base_idx & 7) != 5 && disp == 0 && addr.get_label_id().is_none())
+        {
             0u8 // mod00
         } else if addr.get_label_id().is_some() {
             2u8 // mod10 (always disp32 for labels)
         } else if disp8n == 0 {
-            if is_in_disp8(disp) { 1 } else { 2 } // mod01 or mod10
+            if is_in_disp8(disp) {
+                1
+            } else {
+                2
+            } // mod01 or mod10
         } else {
             let t = (disp as i32 / disp8n as i32) as u32;
             if (disp as i32 % disp8n as i32) == 0 && is_in_disp8(t) {
@@ -202,8 +260,12 @@ impl CodeBuffer {
 
         if has_sib {
             self.set_modrm(mod_, reg, 4)?; // ESP=4 signals SIB follows
-            // SIB: [SS:index:base]
-            let idx = if index_bit > 0 { index.get_idx() & 7 } else { 4 }; // ESP=4 = no index
+                                           // SIB: [SS:index:base]
+            let idx = if index_bit > 0 {
+                index.get_idx() & 7
+            } else {
+                4
+            }; // ESP=4 = no index
             let scale = exp.get_scale();
             let ss = match scale {
                 8 => 3,
@@ -234,14 +296,13 @@ impl CodeBuffer {
 
     /// Emit address operand (ModRM + SIB + displacement), handling
     /// ModRM, RIP-relative, and 64-bit displacement modes.
+    #[inline]
     pub(crate) fn emit_addr(&mut self, addr: &Address, reg: u8) -> Result<()> {
         if !addr.permit_vsib && addr.is_vsib() {
             return Err(Error::BadVsibAddressing);
         }
         match addr.get_mode() {
-            AddressMode::ModRM => {
-                self.emit_sib(addr, reg)
-            }
+            AddressMode::ModRM => self.emit_sib(addr, reg),
             AddressMode::Rip | AddressMode::RipAddr => {
                 self.set_modrm(0, reg, 5)?;
                 if addr.get_label_id().is_some() {
@@ -258,11 +319,12 @@ impl CodeBuffer {
                 }
                 Ok(())
             }
-            _ => Ok(())
+            _ => Ok(()),
         }
     }
 
     /// Emit VEX prefix (2 or 3-byte form).
+    #[inline]
     pub(crate) fn emit_vex(
         &mut self,
         reg: &Reg,
@@ -272,7 +334,11 @@ impl CodeBuffer {
         code: u8,
         x: bool,
     ) -> Result<()> {
-        let w = if type_.contains(TypeFlags::T_W1) { 1u8 } else { 0 };
+        let w = if type_.contains(TypeFlags::T_W1) {
+            1u8
+        } else {
+            0
+        };
         let is256 = type_.contains(TypeFlags::T_L1) || reg.is_ymm() || base.is_ymm();
         let r = reg.is_ext_idx();
         let b = base.is_ext_idx();
@@ -294,7 +360,10 @@ impl CodeBuffer {
             // 3-byte VEX
             let mmmm = type_.get_map();
             self.db(0xC4)?;
-            self.db((if r { 0 } else { 0x80 }) | (if x { 0 } else { 0x40 }) | (if b { 0 } else { 0x20 }) | mmmm)?;
+            self.db((if r { 0 } else { 0x80 })
+                | (if x { 0 } else { 0x40 })
+                | (if b { 0 } else { 0x20 })
+                | mmmm)?;
             self.db((w << 7) | vvvv)?;
         }
         self.db(code)
@@ -304,6 +373,7 @@ impl CodeBuffer {
     ///
     /// Returns the disp8*N scaling factor.
     #[allow(clippy::too_many_arguments)]
+    #[inline]
     pub(crate) fn emit_evex(
         &mut self,
         reg: &Reg,
@@ -320,17 +390,28 @@ impl CodeBuffer {
         if !type_.intersects(TypeFlags::T_EVEX | TypeFlags::T_MUST_EVEX) {
             return Err(Error::EvexIsInvalid);
         }
-        let w = if type_.contains(TypeFlags::T_EW1) { 1u8 } else { 0 };
+        let w = if type_.contains(TypeFlags::T_EW1) {
+            1u8
+        } else {
+            0
+        };
         let mmm = type_.get_map();
         let pp = type_.get_pp();
         let idx = v.map_or(0, |v| v.get_idx());
         let vvvv = !idx;
 
         let r_flag = reg.is_ext_idx();
-        let x3 = x_reg.map_or(false, |x| x.is_ext_idx())
-            || (base.is_simd() && base.is_ext_idx2());
-        let b4 = if base.is_reg() && base.is_ext_idx2() { 8u8 } else { 0 };
-        let u = if x_reg.map_or(false, |x| x.is_reg() && x.is_ext_idx2()) { 0u8 } else { 4 };
+        let x3 = x_reg.map_or(false, |x| x.is_ext_idx()) || (base.is_simd() && base.is_ext_idx2());
+        let b4 = if base.is_reg() && base.is_ext_idx2() {
+            8u8
+        } else {
+            0
+        };
+        let u = if x_reg.map_or(false, |x| x.is_reg() && x.is_ext_idx2()) {
+            0u8
+        } else {
+            4
+        };
         let b_ext = base.is_ext_idx();
         let rp = reg.is_ext_idx2();
 
@@ -370,16 +451,30 @@ impl CodeBuffer {
                 vl = vl.max(v_reg.get_bit() as u32);
             }
             vl = vl.max(reg.get_bit() as u32).max(base.get_bit() as u32);
-            ll = if vl >= 512 { 2 } else if vl == 256 { 1 } else { 0 };
+            ll = if vl >= 512 {
+                2
+            } else if vl == 256 {
+                1
+            } else {
+                0
+            };
 
             if b_bit {
                 let b16 = TypeFlags::T_B16;
                 let b32 = TypeFlags::T_B32;
-                disp8n = if (type_.0 & b16.0) == b16.0 { 2 }
-                    else if type_.contains(b32) { 4 }
-                    else { 8 };
+                disp8n = if (type_.0 & b16.0) == b16.0 {
+                    2
+                } else if type_.contains(b32) {
+                    4
+                } else {
+                    8
+                };
             } else if type_.get_n() == TypeFlags::T_DUP.0 as u8 {
-                disp8n = match vl { 128 => 8, 256 => 32, _ => 64 };
+                disp8n = match vl {
+                    128 => 8,
+                    256 => 32,
+                    _ => 64,
+                };
             } else {
                 if (type_.0 & (TypeFlags::T_NX_MASK.0 | TypeFlags::T_N_VL.0)) == 0 {
                     type_mut = type_mut | TypeFlags::T_N16 | TypeFlags::T_N_VL;
@@ -388,7 +483,11 @@ impl CodeBuffer {
                 if low > 0 {
                     disp8n = 1 << (low - 1);
                     if type_mut.contains(TypeFlags::T_N_VL) {
-                        disp8n *= match vl { 512 => 4, 256 => 2, _ => 1 };
+                        disp8n *= match vl {
+                            512 => 4,
+                            256 => 2,
+                            _ => 1,
+                        };
                     }
                 }
             }
@@ -401,8 +500,11 @@ impl CodeBuffer {
         let final_aaa = if aaa > 0 {
             aaa
         } else {
-            let vals = [base.get_opmask_idx(), reg.get_opmask_idx(),
-                       v.map_or(0, |v| v.get_opmask_idx())];
+            let vals = [
+                base.get_opmask_idx(),
+                reg.get_opmask_idx(),
+                v.map_or(0, |v| v.get_opmask_idx()),
+            ];
             let non_zero: Vec<u8> = vals.iter().copied().filter(|&x| x > 0).collect();
             if non_zero.len() > 1 && !non_zero.iter().all(|&x| x == non_zero[0]) {
                 return Err(Error::OpmaskIsAlreadySet);
@@ -413,27 +515,18 @@ impl CodeBuffer {
 
         // Emit EVEX 4-byte prefix
         self.db(0x62)?;
-        self.db(
-            (if r_flag { 0 } else { 0x80 })
+        self.db((if r_flag { 0 } else { 0x80 })
             | (if x3 { 0 } else { 0x40 })
             | (if b_ext { 0 } else { 0x20 })
             | (if rp { 0 } else { 0x10 })
             | b4
-            | mmm
-        )?;
-        self.db(
-            (if w == 1 { 0x80 } else { 0 })
-            | (((vvvv & 15) as u8) << 3)
-            | u
-            | (pp & 3)
-        )?;
-        self.db(
-            (if z_bit { 0x80 } else { 0 })
+            | mmm)?;
+        self.db((if w == 1 { 0x80 } else { 0 }) | (((vvvv & 15) as u8) << 3) | u | (pp & 3))?;
+        self.db((if z_bit { 0x80 } else { 0 })
             | ((ll & 3) << 5)
             | (if b_bit { 0x10 } else { 0 })
             | (if v4 { 0 } else { 8 })
-            | (final_aaa & 7)
-        )?;
+            | (final_aaa & 7))?;
         self.db(code)?;
 
         Ok(disp8n)
@@ -441,6 +534,7 @@ impl CodeBuffer {
 
     /// Emit EVEX prefix for legacy encoding (APX).
     #[allow(clippy::too_many_arguments)]
+    #[inline]
     pub(crate) fn emit_evex_leg(
         &mut self,
         r: &Reg,
@@ -451,7 +545,9 @@ impl CodeBuffer {
         sc: Option<u8>,
     ) -> Result<()> {
         let mut m = type_.get_map();
-        if m == 0 { m = 4; } // legacy
+        if m == 0 {
+            m = 4;
+        } // legacy
 
         let r3 = if !r.is_ext_idx() { 0x80u8 } else { 0 };
         let x3 = if !x.is_ext_idx() { 0x40u8 } else { 0 };
@@ -459,9 +555,13 @@ impl CodeBuffer {
         let r4 = if !r.is_ext_idx2() { 0x10u8 } else { 0 };
         let b4 = if b.is_ext_idx2() { 0x08u8 } else { 0 };
 
-        let w = if type_.contains(TypeFlags::T_W0) { 0u8 }
-            else if r.is_bit(64) || v.is_bit(64) || type_.contains(TypeFlags::T_W1) { 1 }
-            else { 0 };
+        let w = if type_.contains(TypeFlags::T_W0) {
+            0u8
+        } else if r.is_bit(64) || v.is_bit(64) || type_.contains(TypeFlags::T_W1) {
+            1
+        } else {
+            0
+        };
 
         let v_bits = (((!v.get_idx()) & 15) as u8) << 3;
         let x4 = if !x.is_ext_idx2() { 0x04u8 } else { 0 };
@@ -476,7 +576,11 @@ impl CodeBuffer {
 
         let v4_bit = if !v.is_ext_idx2() { 1u8 } else { 0 };
         let nd = if type_.contains(TypeFlags::T_ZU) {
-            if r.get_zu() || b.get_zu() { 1u8 } else { 0 }
+            if r.get_zu() || b.get_zu() {
+                1u8
+            } else {
+                0
+            }
         } else if type_.contains(TypeFlags::T_ND1) {
             1
         } else if type_.contains(TypeFlags::T_APX) {
@@ -488,8 +592,12 @@ impl CodeBuffer {
         };
 
         let nf = (r.get_nf() || b.get_nf() || x.get_nf() || v.get_nf()) as u8;
-        if !type_.contains(TypeFlags::T_NF) && nf != 0 { return Err(Error::InvalidNf); }
-        if !type_.contains(TypeFlags::T_ZU) && r.get_zu() { return Err(Error::InvalidZu); }
+        if !type_.contains(TypeFlags::T_NF) && nf != 0 {
+            return Err(Error::InvalidNf);
+        }
+        if !type_.contains(TypeFlags::T_ZU) && r.get_zu() {
+            return Err(Error::InvalidZu);
+        }
 
         let l = 0u8;
 
@@ -507,15 +615,11 @@ impl CodeBuffer {
     }
 
     /// Encode reg-reg instruction: REX + opcode + ModR/M(mod=3).
-    pub(crate) fn op_rr(
-        &mut self,
-        r1: &Reg,
-        r2: &Reg,
-        type_: TypeFlags,
-        code: u8,
-    ) -> Result<()> {
+    #[inline]
+    pub(crate) fn op_rr(&mut self, r1: &Reg, r2: &Reg, type_: TypeFlags, code: u8) -> Result<()> {
         if !type_.contains(TypeFlags::T_ALLOW_DIFF_SIZE)
-            && r1.is_reg() && r2.is_reg()
+            && r1.is_reg()
+            && r2.is_reg()
             && r1.get_bit() != r2.get_bit()
         {
             return Err(Error::BadSizeOfRegister);
@@ -526,6 +630,7 @@ impl CodeBuffer {
     }
 
     /// Encode mem-reg instruction: REX + opcode + ModR/M+SIB+disp.
+    #[inline]
     pub(crate) fn op_mr(
         &mut self,
         addr: &Address,
@@ -533,13 +638,16 @@ impl CodeBuffer {
         type_: TypeFlags,
         code: u8,
     ) -> Result<()> {
-        if addr.is_64bit_disp() { return Err(Error::CantUse64BitDisp); }
+        if addr.is_64bit_disp() {
+            return Err(Error::CantUse64BitDisp);
+        }
         let rex2 = self.emit_rex_for_reg_mem(r, addr, type_)?;
         self.write_code(type_, r, code, rex2)?;
         self.emit_addr(addr, r.get_idx())
     }
 
     /// Encode reg + (reg or mem) instruction with extension field.
+    #[inline]
     pub(crate) fn op_rext(
         &mut self,
         rm: &RegMem,
@@ -550,7 +658,15 @@ impl CodeBuffer {
     ) -> Result<()> {
         match rm {
             RegMem::Mem(addr) => {
-                let r = Reg::new(ext, crate::operand::Kind::Reg, if addr.get_bit() > 0 { addr.get_bit() } else { 32 });
+                let r = Reg::new(
+                    ext,
+                    crate::operand::Kind::Reg,
+                    if addr.get_bit() > 0 {
+                        addr.get_bit()
+                    } else {
+                        32
+                    },
+                );
                 let mut addr_with_imm = *addr;
                 addr_with_imm.imm_size = imm_size;
                 self.op_mr(&addr_with_imm, &r, type_, code)
@@ -563,6 +679,7 @@ impl CodeBuffer {
     }
 
     /// Dispatch reg to reg-or-mem operand (opRO in C++).
+    #[inline]
     pub(crate) fn op_ro(
         &mut self,
         r: &Reg,
@@ -589,6 +706,7 @@ impl CodeBuffer {
     }
 
     /// SSE instruction encoding helper.
+    #[inline]
     pub(crate) fn op_sse(
         &mut self,
         r: &Reg,
@@ -612,6 +730,7 @@ impl CodeBuffer {
     /// `type_` contains encoding flags.
     /// `code` is the opcode byte.
     /// `imm8` is an optional immediate byte.
+    #[inline]
     pub(crate) fn op_vex(
         &mut self,
         r: &Reg,
@@ -629,7 +748,9 @@ impl CodeBuffer {
                 let index = *exp.get_index();
 
                 // 32-bit address override in 64-bit mode
-                if addr.is_32bit() { self.db(0x67)?; }
+                if addr.is_32bit() {
+                    self.db(0x67)?;
+                }
 
                 let need_evex = type_.intersects(TypeFlags::T_MUST_EVEX | TypeFlags::T_MEM_EVEX)
                     || r.has_evex()
@@ -642,16 +763,37 @@ impl CodeBuffer {
                     if b && !type_.intersects(TypeFlags::T_B32 | TypeFlags::T_B64) {
                         return Err(Error::InvalidBroadcast);
                     }
-                    let vl = if exp.is_vsib() { index.get_bit() as u32 } else { 0 };
+                    let vl = if exp.is_vsib() {
+                        index.get_bit() as u32
+                    } else {
+                        0
+                    };
                     let hi16_vidx = index.is_simd() && index.is_ext_idx2();
-                    let disp8n = self.emit_evex(r, &base, p1, type_, code, Some(&index), b, 0, vl, hi16_vidx)?;
-                    if disp8n > 0 { addr.disp8n = disp8n; }
+                    let disp8n = self.emit_evex(
+                        r,
+                        &base,
+                        p1,
+                        type_,
+                        code,
+                        Some(&index),
+                        b,
+                        0,
+                        vl,
+                        hi16_vidx,
+                    )?;
+                    if disp8n > 0 {
+                        addr.disp8n = disp8n;
+                    }
                 } else {
                     self.emit_vex(r, &base, p1, type_, code, index.is_ext_idx())?;
                 }
 
-                if type_.contains(TypeFlags::T_VSIB) { addr.permit_vsib = true; }
-                if imm8.is_some() { addr.imm_size = 1; }
+                if type_.contains(TypeFlags::T_VSIB) {
+                    addr.permit_vsib = true;
+                }
+                if imm8.is_some() {
+                    addr.imm_size = 1;
+                }
                 self.emit_addr(&addr, r.get_idx())?;
             }
             RegMem::Reg(base) => {

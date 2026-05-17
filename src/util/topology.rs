@@ -2,7 +2,6 @@
 ///
 /// Port of xbyak_util.h `CpuTopology` class.
 /// Reads cache hierarchy and core topology from the OS.
-
 use std::collections::BTreeSet;
 
 /// Core type for hybrid architectures (Intel Alder Lake+).
@@ -156,13 +155,18 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
                 libc::sysconf(libc::_SC_NPROCESSORS_ONLN) as u32
             }
             #[cfg(not(unix))]
-            { return false; }
+            {
+                return false;
+            }
         }
     };
 
-    if logical_cpu_num == 0 { return false; }
+    if logical_cpu_num == 0 {
+        return false;
+    }
 
-    topo.logical_cpus.resize_with(logical_cpu_num as usize, LogicalCpu::new);
+    topo.logical_cpus
+        .resize_with(logical_cpu_num as usize, LogicalCpu::new);
     let mut max_physical_idx = 0u32;
 
     for cpu_idx in 0..logical_cpu_num {
@@ -206,7 +210,8 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
             }
 
             // Read associativity
-            cache.associativity = read_int_from_file(&format!("{}/ways_of_associativity", cache_base));
+            cache.associativity =
+                read_int_from_file(&format!("{}/ways_of_associativity", cache_base));
 
             // Read shared CPU list
             if let Ok(s) = fs::read_to_string(format!("{}/shared_cpu_list", cache_base)) {
@@ -234,9 +239,8 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
     }
 
     // Read cache line size
-    topo.line_size = read_int_from_file(
-        "/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size",
-    );
+    topo.line_size =
+        read_int_from_file("/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size");
 
     topo.physical_core_num = (max_physical_idx + 1) as usize;
     true
@@ -268,11 +272,13 @@ fn read_int_from_file(path: &str) -> u32 {
 /// Parse a size string like "32K", "1M", "512" into bytes.
 fn parse_size(s: &str) -> u32 {
     let s = s.trim();
-    if s.is_empty() { return 0; }
+    if s.is_empty() {
+        return 0;
+    }
     let (num_str, suffix) = if s.ends_with('K') || s.ends_with('k') {
-        (&s[..s.len()-1], 1024u32)
+        (&s[..s.len() - 1], 1024u32)
     } else if s.ends_with('M') || s.ends_with('m') {
-        (&s[..s.len()-1], 1024 * 1024)
+        (&s[..s.len() - 1], 1024 * 1024)
     } else {
         (s, 1)
     };
@@ -282,12 +288,14 @@ fn parse_size(s: &str) -> u32 {
 /// Parse a CPU list string like "0-3,5,7,10-12" into a set of indices.
 fn parse_cpu_list(s: &str) -> BTreeSet<u32> {
     let mut set = BTreeSet::new();
-    if s.is_empty() { return set; }
+    if s.is_empty() {
+        return set;
+    }
     for part in s.split(',') {
         let part = part.trim();
         if let Some(dash) = part.find('-') {
             let start: u32 = part[..dash].parse().unwrap_or(0);
-            let end: u32 = part[dash+1..].parse().unwrap_or(0);
+            let end: u32 = part[dash + 1..].parse().unwrap_or(0);
             for i in start..=end {
                 set.insert(i);
             }

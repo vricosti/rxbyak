@@ -21,7 +21,9 @@ impl Clock {
             core::arch::x86_64::_rdtsc() as u64
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-        { 0 }
+        {
+            0
+        }
     }
 
     /// Start a measurement interval.
@@ -49,7 +51,11 @@ impl Clock {
 
     /// Average cycles per interval (0 if no intervals).
     pub fn average(&self) -> u64 {
-        if self.count == 0 { 0 } else { self.clock / self.count as u64 }
+        if self.count == 0 {
+            0
+        } else {
+            self.clock / self.count as u64
+        }
     }
 
     /// Reset the counter.

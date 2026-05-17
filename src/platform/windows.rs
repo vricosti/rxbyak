@@ -1,5 +1,5 @@
-use crate::error::{Error, Result};
 use super::ProtectMode;
+use crate::error::{Error, Result};
 
 pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     let ptr = unsafe {
@@ -49,7 +49,9 @@ pub unsafe fn protect(ptr: *mut u8, size: usize, mode: ProtectMode) -> Result<()
 }
 
 pub fn page_size() -> usize {
-    let mut si = unsafe { core::mem::zeroed::<windows_sys::Win32::System::SystemInformation::SYSTEM_INFO>() };
+    let mut si = unsafe {
+        core::mem::zeroed::<windows_sys::Win32::System::SystemInformation::SYSTEM_INFO>()
+    };
     unsafe {
         windows_sys::Win32::System::SystemInformation::GetSystemInfo(&mut si);
     }

@@ -29,7 +29,9 @@ fn has_popcnt() -> bool {
 }
 
 #[cfg(not(target_arch = "x86_64"))]
-fn has_popcnt() -> bool { false }
+fn has_popcnt() -> bool {
+    false
+}
 
 fn print_cpu_features() {
     #[cfg(target_arch = "x86_64")]

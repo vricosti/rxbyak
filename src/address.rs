@@ -9,9 +9,9 @@ use crate::operand::Reg;
 pub enum AddressMode {
     None,
     ModRM,
-    Disp64,   // 64-bit absolute displacement (moffset)
-    Rip,      // [rip + disp]
-    RipAddr,  // [rip + label]
+    Disp64,  // 64-bit absolute displacement (moffset)
+    Rip,     // [rip + disp]
+    RipAddr, // [rip + label]
 }
 
 /// A register expression representing `[base + index * scale + disp]`.
@@ -47,7 +47,10 @@ impl Default for RegExp {
 impl RegExp {
     /// Create a RegExp from a single displacement.
     pub fn from_disp(disp: i64) -> Self {
-        Self { disp, ..Default::default() }
+        Self {
+            disp,
+            ..Default::default()
+        }
     }
 
     /// Create a RegExp from a single register (as base).
@@ -83,14 +86,22 @@ impl RegExp {
 
     /// Create a RIP-relative RegExp with raw displacement.
     pub fn rip() -> Self {
-        Self { rip: true, ..Default::default() }
+        Self {
+            rip: true,
+            ..Default::default()
+        }
     }
 
     /// Create a RIP-relative RegExp with an absolute target address.
     /// The encoder computes `disp32 = addr - (emit_pos + 4 + imm_size)`
     /// at emit time, matching Xbyak's `code.rip + void_ptr` (isAddr_=true).
     pub fn rip_addr(addr: i64) -> Self {
-        Self { rip: true, is_addr: true, disp: addr, ..Default::default() }
+        Self {
+            rip: true,
+            is_addr: true,
+            disp: addr,
+            ..Default::default()
+        }
     }
 
     /// Whether this expression uses VSIB addressing.
@@ -107,8 +118,8 @@ impl RegExp {
     /// Optimize: `[reg*2]` → `[reg + reg]`
     pub fn optimize(&self) -> Self {
         let mut exp = *self;
-        let is_gpr32e = exp.index.is_reg()
-            && (exp.index.get_bit() == 32 || exp.index.get_bit() == 64);
+        let is_gpr32e =
+            exp.index.is_reg() && (exp.index.get_bit() == 32 || exp.index.get_bit() == 64);
         if is_gpr32e && exp.base.get_bit() == 0 && exp.scale == 2 {
             exp.base = exp.index;
             exp.scale = 1;
@@ -176,12 +187,24 @@ impl RegExp {
         Ok(ret)
     }
 
-    pub fn get_base(&self) -> &Reg { &self.base }
-    pub fn get_index(&self) -> &Reg { &self.index }
-    pub fn get_scale(&self) -> u8 { self.scale }
-    pub fn get_disp(&self) -> i64 { self.disp }
-    pub fn is_rip(&self) -> bool { self.rip }
-    pub fn get_label_id(&self) -> Option<LabelId> { self.label_id }
+    pub fn get_base(&self) -> &Reg {
+        &self.base
+    }
+    pub fn get_index(&self) -> &Reg {
+        &self.index
+    }
+    pub fn get_scale(&self) -> u8 {
+        self.scale
+    }
+    pub fn get_disp(&self) -> i64 {
+        self.disp
+    }
+    pub fn is_rip(&self) -> bool {
+        self.rip
+    }
+    pub fn get_label_id(&self) -> Option<LabelId> {
+        self.label_id
+    }
 }
 
 impl PartialEq for RegExp {
@@ -334,7 +357,11 @@ impl Address {
 
     /// Get the (potentially optimized) RegExp.
     pub fn get_reg_exp(&self) -> RegExp {
-        if self.optimize { self.exp.optimize() } else { self.exp }
+        if self.optimize {
+            self.exp.optimize()
+        } else {
+            self.exp
+        }
     }
 
     /// Clone without optimization.
@@ -344,14 +371,30 @@ impl Address {
         addr
     }
 
-    pub fn get_mode(&self) -> AddressMode { self.mode }
-    pub fn get_bit(&self) -> u16 { self.bit }
-    pub fn is_broadcast(&self) -> bool { self.broadcast }
-    pub fn is_vsib(&self) -> bool { self.exp.is_vsib() }
-    pub fn is_only_disp(&self) -> bool { self.exp.is_only_disp() }
-    pub fn get_disp(&self) -> i64 { self.exp.disp }
-    pub fn is_64bit_disp(&self) -> bool { self.mode == AddressMode::Disp64 }
-    pub fn get_label_id(&self) -> Option<LabelId> { self.label_id }
+    pub fn get_mode(&self) -> AddressMode {
+        self.mode
+    }
+    pub fn get_bit(&self) -> u16 {
+        self.bit
+    }
+    pub fn is_broadcast(&self) -> bool {
+        self.broadcast
+    }
+    pub fn is_vsib(&self) -> bool {
+        self.exp.is_vsib()
+    }
+    pub fn is_only_disp(&self) -> bool {
+        self.exp.is_only_disp()
+    }
+    pub fn get_disp(&self) -> i64 {
+        self.exp.disp
+    }
+    pub fn is_64bit_disp(&self) -> bool {
+        self.mode == AddressMode::Disp64
+    }
+    pub fn get_label_id(&self) -> Option<LabelId> {
+        self.label_id
+    }
 
     pub fn is_32bit(&self) -> bool {
         self.exp.base.get_bit() == 32 || self.exp.index.get_bit() == 32

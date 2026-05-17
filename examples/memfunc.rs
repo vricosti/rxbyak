@@ -27,18 +27,17 @@ fn main() -> Result<()> {
     // Use raw registers matching System V calling convention
     // 6 params total: self_ptr + 5 ints
     // RDI = self_ptr, RSI = a, RDX = b, RCX = c, R8 = d, R9 = e
-    asm.mov(EAX, dword_ptr(RDI.into()))?;     // self.x
-    asm.add(EAX, dword_ptr(RDI + 4))?;       // self.y
-    asm.add(EAX, ESI)?;                        // a
-    asm.add(EAX, EDX)?;                        // b
-    asm.add(EAX, ECX)?;                        // c
-    asm.add(EAX, R8D)?;                        // d
-    asm.add(EAX, R9D)?;                        // e
+    asm.mov(EAX, dword_ptr(RDI.into()))?; // self.x
+    asm.add(EAX, dword_ptr(RDI + 4))?; // self.y
+    asm.add(EAX, ESI)?; // a
+    asm.add(EAX, EDX)?; // b
+    asm.add(EAX, ECX)?; // c
+    asm.add(EAX, R8D)?; // d
+    asm.add(EAX, R9D)?; // e
     asm.ret()?;
     asm.ready()?;
 
-    let jit_func: fn(*const A, i32, i32, i32, i32, i32) -> i32 =
-        unsafe { asm.get_code() };
+    let jit_func: fn(*const A, i32, i32, i32, i32, i32) -> i32 = unsafe { asm.get_code() };
 
     let mut rng_state: u32 = 42;
     let mut next_rand = || -> i32 {

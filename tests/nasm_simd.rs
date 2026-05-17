@@ -1,5 +1,4 @@
 /// SSE/AVX instruction tests validated against NASM reference assembler.
-
 mod common;
 
 use common::*;
@@ -58,7 +57,10 @@ fn test_nasm_sse_float_ops() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in xmm_pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -92,7 +94,10 @@ fn test_nasm_sse_logic_ops() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in xmm_pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -126,7 +131,10 @@ fn test_nasm_sse_mov_ops() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in xmm_pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -158,7 +166,10 @@ fn test_nasm_sse_int_ops() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in xmm_pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -188,7 +199,10 @@ fn test_nasm_sse_compare() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in xmm_pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -211,7 +225,10 @@ fn test_nasm_sse_convert() {
         for &(dst, dst_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
             for &(src, src_name) in &[(XMM1, "xmm1"), (XMM9, "xmm9")] {
                 let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-                insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+                insns.push((
+                    asm_text,
+                    Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+                ));
             }
         }
     }
@@ -230,9 +247,10 @@ fn test_nasm_sse_mem() {
     for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
         for &(base, base_name) in &[(RAX, "rax"), (RBX, "rbx"), (R8, "r8")] {
             let asm_text = format!("addps {}, oword [{}]", xmm_name, base_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-                a.addps(xmm, xmmword_ptr(base.into()))
-            })));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| a.addps(xmm, xmmword_ptr(base.into()))),
+            ));
         }
     }
 
@@ -240,18 +258,20 @@ fn test_nasm_sse_mem() {
     for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM15, "xmm15")] {
         for &(base, base_name) in &[(RAX, "rax"), (R8, "r8")] {
             let asm_text = format!("movaps oword [{}], {}", base_name, xmm_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-                a.movaps(xmmword_ptr(base.into()), xmm)
-            })));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| a.movaps(xmmword_ptr(base.into()), xmm)),
+            ));
         }
     }
 
     // movaps xmm, [mem + disp]
     for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
         let asm_text = format!("movaps {}, oword [rax+0x10]", xmm_name);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.movaps(xmm, xmmword_ptr(RAX + 0x10))
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.movaps(xmm, xmmword_ptr(RAX + 0x10))),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);
@@ -268,7 +288,10 @@ fn test_nasm_movd_movq() {
     for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
         for &(gpr, gpr_name) in &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")] {
             let asm_text = format!("movd {}, {}", xmm_name, gpr_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.movd(xmm, gpr))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| a.movd(xmm, gpr)),
+            ));
         }
     }
 
@@ -276,7 +299,10 @@ fn test_nasm_movd_movq() {
     for &(gpr, gpr_name) in &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")] {
         for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
             let asm_text = format!("movd {}, {}", gpr_name, xmm_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.movd(gpr, xmm))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| a.movd(gpr, xmm)),
+            ));
         }
     }
 
@@ -284,7 +310,10 @@ fn test_nasm_movd_movq() {
     for &(dst, dst_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
         for &(src, src_name) in &[(XMM1, "xmm1"), (XMM9, "xmm9")] {
             let asm_text = format!("movq {}, {}", dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.movq(dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| a.movq(dst, src)),
+            ));
         }
     }
 
@@ -328,7 +357,10 @@ fn test_nasm_avx_float_ops_xmm() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -362,7 +394,10 @@ fn test_nasm_avx_float_ops_ymm() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -390,7 +425,10 @@ fn test_nasm_avx_mov_ops() {
         for &(dst, dst_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8"), (XMM15, "xmm15")] {
             for &(src, src_name) in &[(XMM1, "xmm1"), (XMM9, "xmm9")] {
                 let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-                insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+                insns.push((
+                    asm_text,
+                    Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+                ));
             }
         }
     }
@@ -400,7 +438,10 @@ fn test_nasm_avx_mov_ops() {
         for &(dst, dst_name) in &[(YMM0, "ymm0"), (YMM8, "ymm8")] {
             for &(src, src_name) in &[(YMM1, "ymm1"), (YMM9, "ymm9")] {
                 let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-                insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+                insns.push((
+                    asm_text,
+                    Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+                ));
             }
         }
     }
@@ -433,7 +474,10 @@ fn test_nasm_avx_int_ops() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -450,33 +494,37 @@ fn test_nasm_avx_mem() {
     // vaddps xmm, xmm, [mem]
     for &(base, base_name) in &[(RAX, "rax"), (RBX, "rbx"), (R8, "r8")] {
         let asm_text = format!("vaddps xmm0, xmm1, oword [{}]", base_name);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.vaddps(XMM0, XMM1, xmmword_ptr(base.into()))
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vaddps(XMM0, XMM1, xmmword_ptr(base.into()))),
+        ));
     }
 
     // vaddps xmm, xmm, [mem + disp]
     {
         let asm_text = "vaddps xmm0, xmm1, oword [rax+0x10]".to_string();
-        insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-            a.vaddps(XMM0, XMM1, xmmword_ptr(RAX + 0x10))
-        })));
+        insns.push((
+            asm_text,
+            Box::new(|a: &mut CodeAssembler| a.vaddps(XMM0, XMM1, xmmword_ptr(RAX + 0x10))),
+        ));
     }
 
     // vmovaps [mem], xmm
     for &(base, base_name) in &[(RAX, "rax"), (R8, "r8")] {
         let asm_text = format!("vmovaps oword [{}], xmm0", base_name);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| {
-            a.vmovaps(xmmword_ptr(base.into()), XMM0)
-        })));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| a.vmovaps(xmmword_ptr(base.into()), XMM0)),
+        ));
     }
 
     // vaddps ymm, ymm, [mem]
     {
         let asm_text = "vaddps ymm0, ymm1, yword [rax]".to_string();
-        insns.push((asm_text, Box::new(|a: &mut CodeAssembler| {
-            a.vaddps(YMM0, YMM1, ymmword_ptr(RAX.into()))
-        })));
+        insns.push((
+            asm_text,
+            Box::new(|a: &mut CodeAssembler| a.vaddps(YMM0, YMM1, ymmword_ptr(RAX.into()))),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);
@@ -510,7 +558,10 @@ fn test_nasm_fma_ops() {
     for &(mnemonic, method) in ops {
         for &(d, dn, s1, s1n, s2, s2n) in triples {
             let asm_text = format!("{} {}, {}, {}", mnemonic, dn, s1n, s2n);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, d, s1, s2)),
+            ));
         }
     }
 
@@ -523,7 +574,10 @@ fn test_nasm_fma_ops() {
 
     for &(mnemonic, method) in ymm_ops {
         let asm_text = format!("{} ymm0, ymm1, ymm2", mnemonic);
-        insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, YMM0, YMM1, YMM2))));
+        insns.push((
+            asm_text,
+            Box::new(move |a: &mut CodeAssembler| method(a, YMM0, YMM1, YMM2)),
+        ));
     }
 
     compare_nasm_batch(&nasm, 64, insns);
@@ -538,9 +592,17 @@ fn test_nasm_sse_all_xmm_pairs() {
 
     // addps with all xmm0-xmm15 pairs (subset: each with xmm0 and xmm8)
     for &(dst, dst_name) in XMMS.iter().chain(XMMS_EXT.iter()) {
-        for &(src, src_name) in &[(XMM0, "xmm0"), (XMM1, "xmm1"), (XMM8, "xmm8"), (XMM15, "xmm15")] {
+        for &(src, src_name) in &[
+            (XMM0, "xmm0"),
+            (XMM1, "xmm1"),
+            (XMM8, "xmm8"),
+            (XMM15, "xmm15"),
+        ] {
             let asm_text = format!("addps {}, {}", dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.addps(dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| a.addps(dst, src)),
+            ));
         }
     }
 
@@ -582,7 +644,10 @@ fn test_nasm_generated_sse_ops() {
     for &(mnemonic, method) in ops {
         for &(dst, dst_name, src, src_name) in xmm_pairs {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -620,12 +685,14 @@ fn test_nasm_sse3_ssse3_ops() {
     ];
 
     for &(mnemonic, method) in ops {
-        for &(dst, dst_name, src, src_name) in &[
-            (XMM0, "xmm0", XMM1, "xmm1"),
-            (XMM8, "xmm8", XMM9, "xmm9"),
-        ] {
+        for &(dst, dst_name, src, src_name) in
+            &[(XMM0, "xmm0", XMM1, "xmm1"), (XMM8, "xmm8", XMM9, "xmm9")]
+        {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -646,12 +713,14 @@ fn test_nasm_sse4_ops() {
     ];
 
     for &(mnemonic, method) in ops {
-        for &(dst, dst_name, src, src_name) in &[
-            (XMM0, "xmm0", XMM1, "xmm1"),
-            (XMM8, "xmm8", XMM9, "xmm9"),
-        ] {
+        for &(dst, dst_name, src, src_name) in
+            &[(XMM0, "xmm0", XMM1, "xmm1"), (XMM8, "xmm8", XMM9, "xmm9")]
+        {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -673,12 +742,14 @@ fn test_nasm_aes_ops() {
     ];
 
     for &(mnemonic, method) in ops {
-        for &(dst, dst_name, src, src_name) in &[
-            (XMM0, "xmm0", XMM1, "xmm1"),
-            (XMM8, "xmm8", XMM9, "xmm9"),
-        ] {
+        for &(dst, dst_name, src, src_name) in
+            &[(XMM0, "xmm0", XMM1, "xmm1"), (XMM8, "xmm8", XMM9, "xmm9")]
+        {
             let asm_text = format!("{} {}, {}", mnemonic, dst_name, src_name);
-            insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| method(a, dst, src))));
+            insns.push((
+                asm_text,
+                Box::new(move |a: &mut CodeAssembler| method(a, dst, src)),
+            ));
         }
     }
 
@@ -691,24 +762,78 @@ fn test_nasm_aes_ops() {
 fn test_nasm_sse_imm8_ops() {
     let nasm = skip_if_no_nasm!();
     let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
-        ("cmpps xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.cmpps(XMM0, XMM1, 0))),
-        ("cmpps xmm0, xmm1, 5".into(), Box::new(|a: &mut CodeAssembler| a.cmpps(XMM0, XMM1, 5))),
-        ("cmppd xmm0, xmm1, 1".into(), Box::new(|a: &mut CodeAssembler| a.cmppd(XMM0, XMM1, 1))),
-        ("shufps xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.shufps(XMM0, XMM1, 0))),
-        ("shufps xmm0, xmm1, 0x44".into(), Box::new(|a: &mut CodeAssembler| a.shufps(XMM0, XMM1, 0x44))),
-        ("shufpd xmm0, xmm1, 1".into(), Box::new(|a: &mut CodeAssembler| a.shufpd(XMM0, XMM1, 1))),
-        ("pshufd xmm0, xmm1, 0x1b".into(), Box::new(|a: &mut CodeAssembler| a.pshufd(XMM0, XMM1, 0x1B))),
-        ("pshufhw xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.pshufhw(XMM0, XMM1, 0))),
-        ("pshuflw xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.pshuflw(XMM0, XMM1, 0))),
-        ("roundps xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.roundps(XMM0, XMM1, 0))),
-        ("roundpd xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.roundpd(XMM0, XMM1, 0))),
-        ("roundss xmm0, xmm1, 2".into(), Box::new(|a: &mut CodeAssembler| a.roundss(XMM0, XMM1, 2))),
-        ("roundsd xmm0, xmm1, 1".into(), Box::new(|a: &mut CodeAssembler| a.roundsd(XMM0, XMM1, 1))),
-        ("blendps xmm0, xmm1, 5".into(), Box::new(|a: &mut CodeAssembler| a.blendps(XMM0, XMM1, 5))),
-        ("blendpd xmm0, xmm1, 3".into(), Box::new(|a: &mut CodeAssembler| a.blendpd(XMM0, XMM1, 3))),
-        ("insertps xmm0, xmm1, 0x10".into(), Box::new(|a: &mut CodeAssembler| a.insertps(XMM0, XMM1, 0x10))),
-        ("palignr xmm0, xmm1, 4".into(), Box::new(|a: &mut CodeAssembler| a.palignr(XMM0, XMM1, 4))),
-        ("pclmulqdq xmm0, xmm1, 0".into(), Box::new(|a: &mut CodeAssembler| a.pclmulqdq(XMM0, XMM1, 0))),
+        (
+            "cmpps xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.cmpps(XMM0, XMM1, 0)),
+        ),
+        (
+            "cmpps xmm0, xmm1, 5".into(),
+            Box::new(|a: &mut CodeAssembler| a.cmpps(XMM0, XMM1, 5)),
+        ),
+        (
+            "cmppd xmm0, xmm1, 1".into(),
+            Box::new(|a: &mut CodeAssembler| a.cmppd(XMM0, XMM1, 1)),
+        ),
+        (
+            "shufps xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.shufps(XMM0, XMM1, 0)),
+        ),
+        (
+            "shufps xmm0, xmm1, 0x44".into(),
+            Box::new(|a: &mut CodeAssembler| a.shufps(XMM0, XMM1, 0x44)),
+        ),
+        (
+            "shufpd xmm0, xmm1, 1".into(),
+            Box::new(|a: &mut CodeAssembler| a.shufpd(XMM0, XMM1, 1)),
+        ),
+        (
+            "pshufd xmm0, xmm1, 0x1b".into(),
+            Box::new(|a: &mut CodeAssembler| a.pshufd(XMM0, XMM1, 0x1B)),
+        ),
+        (
+            "pshufhw xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.pshufhw(XMM0, XMM1, 0)),
+        ),
+        (
+            "pshuflw xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.pshuflw(XMM0, XMM1, 0)),
+        ),
+        (
+            "roundps xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.roundps(XMM0, XMM1, 0)),
+        ),
+        (
+            "roundpd xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.roundpd(XMM0, XMM1, 0)),
+        ),
+        (
+            "roundss xmm0, xmm1, 2".into(),
+            Box::new(|a: &mut CodeAssembler| a.roundss(XMM0, XMM1, 2)),
+        ),
+        (
+            "roundsd xmm0, xmm1, 1".into(),
+            Box::new(|a: &mut CodeAssembler| a.roundsd(XMM0, XMM1, 1)),
+        ),
+        (
+            "blendps xmm0, xmm1, 5".into(),
+            Box::new(|a: &mut CodeAssembler| a.blendps(XMM0, XMM1, 5)),
+        ),
+        (
+            "blendpd xmm0, xmm1, 3".into(),
+            Box::new(|a: &mut CodeAssembler| a.blendpd(XMM0, XMM1, 3)),
+        ),
+        (
+            "insertps xmm0, xmm1, 0x10".into(),
+            Box::new(|a: &mut CodeAssembler| a.insertps(XMM0, XMM1, 0x10)),
+        ),
+        (
+            "palignr xmm0, xmm1, 4".into(),
+            Box::new(|a: &mut CodeAssembler| a.palignr(XMM0, XMM1, 4)),
+        ),
+        (
+            "pclmulqdq xmm0, xmm1, 0".into(),
+            Box::new(|a: &mut CodeAssembler| a.pclmulqdq(XMM0, XMM1, 0)),
+        ),
     ];
     compare_nasm_batch(&nasm, 64, insns);
 }

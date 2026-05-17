@@ -1,5 +1,5 @@
-use rxbyak::*;
 use rxbyak::util::stack_frame::StackFrame;
+use rxbyak::*;
 
 fn assemble_sf(
     p_num: usize,
@@ -189,14 +189,20 @@ fn test_use_rcx_rdx_together() {
 #[test]
 fn test_bad_pnum_5() {
     let mut asm = CodeAssembler::new(4096).unwrap();
-    assert_eq!(StackFrame::new(&mut asm, 5, 0, 0).unwrap_err(), Error::BadPnum);
+    assert_eq!(
+        StackFrame::new(&mut asm, 5, 0, 0).unwrap_err(),
+        Error::BadPnum
+    );
 }
 
 #[test]
 fn test_bad_tnum_overflow() {
     let mut asm = CodeAssembler::new(4096).unwrap();
     // 4 + 11 = 15 > 14
-    assert_eq!(StackFrame::new(&mut asm, 4, 11, 0).unwrap_err(), Error::BadTnum);
+    assert_eq!(
+        StackFrame::new(&mut asm, 4, 11, 0).unwrap_err(),
+        Error::BadTnum
+    );
 }
 
 #[test]
@@ -262,9 +268,9 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,       // push rbx
-                0x5B,       // pop rbx
-                0xC3,       // ret
+                0x53, // push rbx
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -276,11 +282,11 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,       // push rbx
-                0x55,       // push rbp
-                0x5D,       // pop rbp
-                0x5B,       // pop rbx
-                0xC3,       // ret
+                0x53, // push rbx
+                0x55, // push rbp
+                0x5D, // pop rbp
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -292,13 +298,13 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,             // push rbx
-                0x55,             // push rbp
-                0x41, 0x54,       // push r12
-                0x41, 0x5C,       // pop r12
-                0x5D,             // pop rbp
-                0x5B,             // pop rbx
-                0xC3,             // ret
+                0x53, // push rbx
+                0x55, // push rbp
+                0x41, 0x54, // push r12
+                0x41, 0x5C, // pop r12
+                0x5D, // pop rbp
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -313,7 +319,7 @@ mod sysv_encoding {
             [
                 0x48, 0x83, 0xEC, 0x08, // sub rsp, 8
                 0x48, 0x83, 0xC4, 0x08, // add rsp, 8
-                0xC3,                    // ret
+                0xC3, // ret
             ]
         );
     }
@@ -327,7 +333,7 @@ mod sysv_encoding {
             [
                 0x48, 0x83, 0xEC, 0x18, // sub rsp, 24
                 0x48, 0x83, 0xC4, 0x18, // add rsp, 24
-                0xC3,                    // ret
+                0xC3, // ret
             ]
         );
     }
@@ -341,7 +347,7 @@ mod sysv_encoding {
             [
                 0x48, 0x83, 0xEC, 0x18, // sub rsp, 24
                 0x48, 0x83, 0xC4, 0x18, // add rsp, 24
-                0xC3,                    // ret
+                0xC3, // ret
             ]
         );
     }
@@ -354,11 +360,11 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,                    // push rbx
+                0x53, // push rbx
                 0x48, 0x83, 0xEC, 0x10, // sub rsp, 16
                 0x48, 0x83, 0xC4, 0x10, // add rsp, 16
-                0x5B,                    // pop rbx
-                0xC3,                    // ret
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -371,13 +377,13 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,                    // push rbx
-                0x55,                    // push rbp
+                0x53, // push rbx
+                0x55, // push rbp
                 0x48, 0x83, 0xEC, 0x08, // sub rsp, 8
                 0x48, 0x83, 0xC4, 0x08, // add rsp, 8
-                0x5D,                    // pop rbp
-                0x5B,                    // pop rbx
-                0xC3,                    // ret
+                0x5D, // pop rbp
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -390,7 +396,7 @@ mod sysv_encoding {
             code,
             [
                 0x49, 0x89, 0xCA, // mov r10, rcx
-                0xC3,             // ret
+                0xC3, // ret
             ]
         );
     }
@@ -403,7 +409,7 @@ mod sysv_encoding {
             code,
             [
                 0x49, 0x89, 0xD3, // mov r11, rdx
-                0xC3,             // ret
+                0xC3, // ret
             ]
         );
     }
@@ -416,7 +422,7 @@ mod sysv_encoding {
             [
                 0x49, 0x89, 0xCA, // mov r10, rcx
                 0x49, 0x89, 0xD3, // mov r11, rdx
-                0xC3,             // ret
+                0xC3, // ret
             ]
         );
     }
@@ -446,7 +452,7 @@ mod sysv_encoding {
             [
                 0x48, 0x81, 0xEC, 0xC8, 0x00, 0x00, 0x00, // sub rsp, 200
                 0x48, 0x81, 0xC4, 0xC8, 0x00, 0x00, 0x00, // add rsp, 200
-                0xC3,                                       // ret
+                0xC3, // ret
             ]
         );
     }
@@ -459,19 +465,19 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,             // push rbx
-                0x55,             // push rbp
-                0x41, 0x54,       // push r12
-                0x41, 0x55,       // push r13
-                0x41, 0x56,       // push r14
-                0x41, 0x57,       // push r15
-                0x41, 0x5F,       // pop r15
-                0x41, 0x5E,       // pop r14
-                0x41, 0x5D,       // pop r13
-                0x41, 0x5C,       // pop r12
-                0x5D,             // pop rbp
-                0x5B,             // pop rbx
-                0xC3,             // ret
+                0x53, // push rbx
+                0x55, // push rbp
+                0x41, 0x54, // push r12
+                0x41, 0x55, // push r13
+                0x41, 0x56, // push r14
+                0x41, 0x57, // push r15
+                0x41, 0x5F, // pop r15
+                0x41, 0x5E, // pop r14
+                0x41, 0x5D, // pop r13
+                0x41, 0x5C, // pop r12
+                0x5D, // pop rbp
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -484,21 +490,21 @@ mod sysv_encoding {
         assert_eq!(
             code,
             [
-                0x53,                    // push rbx
-                0x55,                    // push rbp
-                0x41, 0x54,              // push r12
-                0x41, 0x55,              // push r13
-                0x41, 0x56,              // push r14
-                0x41, 0x57,              // push r15
+                0x53, // push rbx
+                0x55, // push rbp
+                0x41, 0x54, // push r12
+                0x41, 0x55, // push r13
+                0x41, 0x56, // push r14
+                0x41, 0x57, // push r15
                 0x48, 0x83, 0xEC, 0x28, // sub rsp, 40
                 0x48, 0x83, 0xC4, 0x28, // add rsp, 40
-                0x41, 0x5F,              // pop r15
-                0x41, 0x5E,              // pop r14
-                0x41, 0x5D,              // pop r13
-                0x41, 0x5C,              // pop r12
-                0x5D,                    // pop rbp
-                0x5B,                    // pop rbx
-                0xC3,                    // ret
+                0x41, 0x5F, // pop r15
+                0x41, 0x5E, // pop r14
+                0x41, 0x5D, // pop r13
+                0x41, 0x5C, // pop r12
+                0x5D, // pop rbp
+                0x5B, // pop rbx
+                0xC3, // ret
             ]
         );
     }
@@ -525,9 +531,9 @@ mod win64_encoding {
         assert_eq!(
             code,
             [
-                0x57,       // push rdi
-                0x5F,       // pop rdi
-                0xC3,       // ret
+                0x57, // push rdi
+                0x5F, // pop rdi
+                0xC3, // ret
             ]
         );
     }
@@ -539,11 +545,11 @@ mod win64_encoding {
         assert_eq!(
             code,
             [
-                0x57,       // push rdi
-                0x56,       // push rsi
-                0x5E,       // pop rsi
-                0x5F,       // pop rdi
-                0xC3,       // ret
+                0x57, // push rdi
+                0x56, // push rsi
+                0x5E, // pop rsi
+                0x5F, // pop rdi
+                0xC3, // ret
             ]
         );
     }
@@ -555,13 +561,13 @@ mod win64_encoding {
         assert_eq!(
             code,
             [
-                0x57,       // push rdi
-                0x56,       // push rsi
-                0x53,       // push rbx
-                0x5B,       // pop rbx
-                0x5E,       // pop rsi
-                0x5F,       // pop rdi
-                0xC3,       // ret
+                0x57, // push rdi
+                0x56, // push rsi
+                0x53, // push rbx
+                0x5B, // pop rbx
+                0x5E, // pop rsi
+                0x5F, // pop rdi
+                0xC3, // ret
             ]
         );
     }
@@ -634,22 +640,22 @@ mod win64_encoding {
         assert_eq!(
             code,
             [
-                0x57,             // push rdi
-                0x56,             // push rsi
-                0x53,             // push rbx
-                0x55,             // push rbp
-                0x41, 0x54,       // push r12
-                0x41, 0x55,       // push r13
-                0x41, 0x56,       // push r14
-                0x41, 0x57,       // push r15
-                0x41, 0x5F,       // pop r15
-                0x41, 0x5E,       // pop r14
-                0x41, 0x5D,       // pop r13
-                0x41, 0x5C,       // pop r12
-                0x5D,             // pop rbp
-                0x5B,             // pop rbx
-                0x5E,             // pop rsi
-                0x5F,             // pop rdi
+                0x57, // push rdi
+                0x56, // push rsi
+                0x53, // push rbx
+                0x55, // push rbp
+                0x41, 0x54, // push r12
+                0x41, 0x55, // push r13
+                0x41, 0x56, // push r14
+                0x41, 0x57, // push r15
+                0x41, 0x5F, // pop r15
+                0x41, 0x5E, // pop r14
+                0x41, 0x5D, // pop r13
+                0x41, 0x5C, // pop r12
+                0x5D, // pop rbp
+                0x5B, // pop rbx
+                0x5E, // pop rsi
+                0x5F, // pop rdi
                 0xC3,
             ]
         );
@@ -710,8 +716,7 @@ fn test_parametric_sweep() {
             for &mode in &[0, USE_RCX, USE_RDX, USE_RCX | USE_RDX] {
                 let t_num = t_base | mode;
                 let t_actual = t_base;
-                let extra = (mode & USE_RCX != 0) as usize
-                    + (mode & USE_RDX != 0) as usize;
+                let extra = (mode & USE_RCX != 0) as usize + (mode & USE_RDX != 0) as usize;
                 let all_reg = p_num + t_actual + extra;
                 if all_reg > 14 {
                     continue; // would error
@@ -729,14 +734,13 @@ fn test_parametric_sweep() {
                                 "empty code for p={p_num} t={t_num} stack={stack}"
                             );
                             assert_eq!(
-                                *code.last().unwrap(), 0xC3,
+                                *code.last().unwrap(),
+                                0xC3,
                                 "last byte not ret for p={p_num} t={t_num} stack={stack}"
                             );
                         }
                         Err(e) => {
-                            panic!(
-                                "unexpected error for p={p_num} t={t_num} stack={stack}: {e}"
-                            );
+                            panic!("unexpected error for p={p_num} t={t_num} stack={stack}: {e}");
                         }
                     }
                 }
@@ -951,10 +955,7 @@ mod gen_patterns {
         // No pushes needed (allRegNum=3 < 8)
         // mov rdi, rsi → 48 89 F7
         // ret → C3
-        assert_eq!(
-            code,
-            [0x48, 0x89, 0xF7, 0xC3]
-        );
+        assert_eq!(code, [0x48, 0x89, 0xF7, 0xC3]);
     }
 
     /// gen2: pNum=3, tNum=2, stack=0 — no saves needed
@@ -966,10 +967,7 @@ mod gen_patterns {
             Ok(())
         });
         // p[0]=RDI, t[0]=RCX, mov rcx, rdi → 48 89 F9
-        assert_eq!(
-            code,
-            [0x48, 0x89, 0xF9, 0xC3]
-        );
+        assert_eq!(code, [0x48, 0x89, 0xF9, 0xC3]);
     }
 
     /// gen3: pNum=4, tNum=8, stack=0 — saveNum=4 (RBX, RBP, R12, R13)
@@ -999,10 +997,10 @@ mod gen_patterns {
         assert_eq!(
             code,
             [
-                0x53,                    // push rbx
+                0x53, // push rbx
                 0x48, 0x83, 0xEC, 0x20, // sub rsp, 32
                 0x48, 0x83, 0xC4, 0x20, // add rsp, 32
-                0x5B,                    // pop rbx
+                0x5B, // pop rbx
                 0xC3,
             ]
         );
@@ -1030,10 +1028,10 @@ mod gen_patterns {
         // pNum=4, tNum=5|USE_RCX → allRegNum=4+5+1=10, saveNum=2
         let code = assemble_sf_no_body(4, 5 | USE_RCX, 0);
         // Push RBX, RBP; mov r10, rcx; ...; pop RBP, RBX; ret
-        assert_eq!(code[0], 0x53);       // push rbx
-        assert_eq!(code[1], 0x55);       // push rbp
+        assert_eq!(code[0], 0x53); // push rbx
+        assert_eq!(code[1], 0x55); // push rbp
         assert_eq!(&code[2..5], [0x49, 0x89, 0xCA]); // mov r10, rcx
-        // Epilogue: pop rbp, pop rbx, ret
+                                                     // Epilogue: pop rbp, pop rbx, ret
         let tail = &code[5..];
         assert_eq!(tail, [0x5D, 0x5B, 0xC3]);
     }

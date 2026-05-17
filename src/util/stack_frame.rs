@@ -59,18 +59,18 @@ const MAX_REG_NUM: usize = 14;
 /// Matches xbyak's `getOrderTbl()` (16 - RSP - RAX = 14 entries).
 #[cfg(target_os = "windows")]
 const REG_ORDER: [Reg; MAX_REG_NUM] = [
-    RCX, RDX, R8, R9,      // param regs (4)
-    R10, R11,               // scratch (2) — total scratch (noSaveNum) = 6
-    RDI, RSI, RBX, RBP,    // callee-saved
+    RCX, RDX, R8, R9, // param regs (4)
+    R10, R11, // scratch (2) — total scratch (noSaveNum) = 6
+    RDI, RSI, RBX, RBP, // callee-saved
     R12, R13, R14, R15,
 ];
 
 #[cfg(not(target_os = "windows"))]
 const REG_ORDER: [Reg; MAX_REG_NUM] = [
-    RDI, RSI, RDX, RCX,    // param regs (first 4 of 6)
-    R8, R9,                 // param regs 5-6 (still scratch)
-    R10, R11,               // scratch — total scratch (noSaveNum) = 8
-    RBX, RBP,               // callee-saved
+    RDI, RSI, RDX, RCX, // param regs (first 4 of 6)
+    R8, R9, // param regs 5-6 (still scratch)
+    R10, R11, // scratch — total scratch (noSaveNum) = 8
+    RBX, RBP, // callee-saved
     R12, R13, R14, R15,
 ];
 
@@ -150,10 +150,7 @@ impl StackFrame {
 
         // USE_RCX/USE_RDX each consume an extra register slot (the skipped
         // register is replaced by the next one in order).
-        let all_reg_num = p_num
-            + t_num_actual
-            + use_rcx as usize
-            + use_rdx as usize;
+        let all_reg_num = p_num + t_num_actual + use_rcx as usize + use_rdx as usize;
         if all_reg_num > MAX_REG_NUM {
             return Err(Error::BadTnum);
         }
@@ -264,14 +261,20 @@ mod tests {
     #[test]
     fn test_bad_pnum() {
         let mut asm = CodeAssembler::new(4096).unwrap();
-        assert_eq!(StackFrame::new(&mut asm, 5, 0, 0).unwrap_err(), Error::BadPnum);
+        assert_eq!(
+            StackFrame::new(&mut asm, 5, 0, 0).unwrap_err(),
+            Error::BadPnum
+        );
     }
 
     #[test]
     fn test_bad_tnum() {
         let mut asm = CodeAssembler::new(4096).unwrap();
         // 4 params + 11 temps = 15 > 14
-        assert_eq!(StackFrame::new(&mut asm, 4, 11, 0).unwrap_err(), Error::BadTnum);
+        assert_eq!(
+            StackFrame::new(&mut asm, 4, 11, 0).unwrap_err(),
+            Error::BadTnum
+        );
     }
 
     #[test]
