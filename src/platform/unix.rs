@@ -5,12 +5,22 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     // Allocate as RWX matching upstream dynarmic behavior when
     // DYNARMIC_ENABLE_NO_EXECUTE_SUPPORT is OFF (the default).
     // This eliminates all mprotect toggles during JIT compilation.
+    let mut flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+
+    #[cfg(target_os = "macos")]
+    {
+        // Hardened macOS processes require MAP_JIT for writable executable
+        // mappings. This is harmless for non-hardened runs and keeps the
+        // x64/Rosetta path from failing before the backend can initialize.
+        flags |= libc::MAP_JIT;
+    }
+
     let ptr = unsafe {
         libc::mmap(
             core::ptr::null_mut(),
             size,
             libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            flags,
             -1,
             0,
         )
