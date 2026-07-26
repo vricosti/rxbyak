@@ -107,6 +107,12 @@ impl CodeAssembler {
         self.buf.protect_rw()
     }
 
+    /// Set memory protection to Read+Write+Execute.
+    #[inline]
+    pub fn set_protect_mode_rwe(&mut self) -> Result<()> {
+        self.buf.protect_rwe()
+    }
+
     /// Get a typed function pointer to the generated code.
     ///
     /// # Safety
