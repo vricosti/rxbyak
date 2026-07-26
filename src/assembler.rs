@@ -96,18 +96,15 @@ impl CodeAssembler {
     }
 
     /// Set memory protection to Read+Execute.
-    /// No-op: code cache is allocated as RWX matching upstream dynarmic
-    /// (DYNARMIC_ENABLE_NO_EXECUTE_SUPPORT=OFF, the default).
     #[inline]
     pub fn set_protect_mode_re(&mut self) -> Result<()> {
-        Ok(())
+        self.buf.protect_rx()
     }
 
     /// Set memory protection to Read+Write.
-    /// No-op: code cache is allocated as RWX matching upstream dynarmic.
     #[inline]
     pub fn set_protect_mode_rw(&mut self) -> Result<()> {
-        Ok(())
+        self.buf.protect_rw()
     }
 
     /// Get a typed function pointer to the generated code.
