@@ -220,7 +220,7 @@ fn test_nm_sse_movd_movq() {
     let mut insns: Vec<NmPair> = Vec::new();
 
     // movd xmm, r32
-    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
+    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8"), (XMM14, "xmm14")] {
         for &(gpr, gn) in &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")] {
             let asm = format!("movd {}, {}", xn, gn);
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.movd(xmm, gpr))));
@@ -228,13 +228,13 @@ fn test_nm_sse_movd_movq() {
     }
     // movd r32, xmm
     for &(gpr, gn) in &[(EAX, "eax"), (R8D, "r8d")] {
-        for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
+        for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8"), (XMM14, "xmm14")] {
             let asm = format!("movd {}, {}", gn, xn);
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.movd(gpr, xmm))));
         }
     }
     // movq xmm, r64
-    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
+    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8"), (XMM14, "xmm14")] {
         for &(gpr, gn) in &[(RAX, "rax"), (R8, "r8")] {
             let asm = format!("movq {}, {}", xn, gn);
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.movq(xmm, gpr))));
@@ -242,7 +242,7 @@ fn test_nm_sse_movd_movq() {
     }
     // movq r64, xmm
     for &(gpr, gn) in &[(RAX, "rax"), (R8, "r8")] {
-        for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
+        for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8"), (XMM14, "xmm14")] {
             let asm = format!("movq {}, {}", gn, xn);
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.movq(gpr, xmm))));
         }
@@ -552,7 +552,7 @@ fn test_nm_sse_cvt() {
     let mut insns: Vec<NmPair> = Vec::new();
 
     // cvtsi2ss xmm, r32/r64
-    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
+    for &(xmm, xn) in &[(XMM0, "xmm0"), (XMM8, "xmm8"), (XMM14, "xmm14")] {
         for &(gpr, gn) in &[(EAX, "eax"), (R8D, "r8d")] {
             let asm = format!("cvtsi2ss {}, {}", xn, gn);
             insns.push((
