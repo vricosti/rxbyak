@@ -3723,6 +3723,249 @@ impl CodeAssembler {
         self.buf.db(0xC8 + (reg.get_idx() & 7))
     }
 
+    /// `rorx r32/r64, r/m32/r/m64, imm8` — VEX.LZ.F2.0F3A.F0 /r ib.
+    ///
+    /// RORX is kept as a hand-written size-dependent encoder: unlike the
+    /// generated SIMD tables, VEX.W follows the scalar destination width.
+    #[inline]
+    pub fn rorx(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        if !dst.is_bit(32) && !dst.is_bit(64) {
+            return Err(Error::BadCombination);
+        }
+        let src = src.into();
+        if let RegMem::Reg(src_reg) = src {
+            if src_reg.get_bit() != dst.get_bit() {
+                return Err(Error::BadCombination);
+            }
+        }
+        let mut flags = TypeFlags::T_F2 | TypeFlags::T_0F3A;
+        flags = flags
+            | if dst.is_bit(64) {
+                TypeFlags::T_W1
+            } else {
+                TypeFlags::T_W0
+            };
+        self.buf.op_vex(&dst, None, &src, flags, 0xF0, Some(imm))
+    }
+
+    fn bmi_vex_flags(dst: Reg, mandatory_prefix: TypeFlags) -> Result<TypeFlags> {
+        if !dst.is_bit(32) && !dst.is_bit(64) {
+            return Err(Error::BadCombination);
+        }
+        Ok(TypeFlags::T_0F38
+            | mandatory_prefix
+            | if dst.is_bit(64) {
+                TypeFlags::T_W1
+            } else {
+                TypeFlags::T_W0
+            })
+    }
+
+    fn check_bmi_reg_width(dst: Reg, reg: Reg) -> Result<()> {
+        if reg.get_bit() != dst.get_bit() {
+            return Err(Error::BadCombination);
+        }
+        Ok(())
+    }
+
+    fn check_bmi_rm_width(dst: Reg, operand: &RegMem) -> Result<()> {
+        if let RegMem::Reg(reg) = operand {
+            Self::check_bmi_reg_width(dst, *reg)?;
+        }
+        Ok(())
+    }
+
+    /// `shlx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.66.0F38.F7 /r.
+    #[inline]
+    pub fn shlx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
+        let src = src.into();
+        Self::check_bmi_reg_width(dst, shift)?;
+        Self::check_bmi_rm_width(dst, &src)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&shift),
+            &src,
+            Self::bmi_vex_flags(dst, TypeFlags::T_66)?,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `shrx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.F2.0F38.F7 /r.
+    #[inline]
+    pub fn shrx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
+        let src = src.into();
+        Self::check_bmi_reg_width(dst, shift)?;
+        Self::check_bmi_rm_width(dst, &src)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&shift),
+            &src,
+            Self::bmi_vex_flags(dst, TypeFlags::T_F2)?,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `sarx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.F3.0F38.F7 /r.
+    #[inline]
+    pub fn sarx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
+        let src = src.into();
+        Self::check_bmi_reg_width(dst, shift)?;
+        Self::check_bmi_rm_width(dst, &src)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&shift),
+            &src,
+            Self::bmi_vex_flags(dst, TypeFlags::T_F3)?,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `andn r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.0F38.F2 /r.
+    #[inline]
+    pub fn andn(&mut self, dst: Reg, inverted: Reg, value: impl Into<RegMem>) -> Result<()> {
+        let value = value.into();
+        Self::check_bmi_reg_width(dst, inverted)?;
+        Self::check_bmi_rm_width(dst, &value)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&inverted),
+            &value,
+            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+            0xF2,
+            None,
+        )
+    }
+
+    /// `bextr r32/r64, r/m32/r/m64, r32/r64` — VEX.NDS.LZ.0F38.F7 /r.
+    #[inline]
+    pub fn bextr(&mut self, dst: Reg, src: impl Into<RegMem>, control: Reg) -> Result<()> {
+        let src = src.into();
+        Self::check_bmi_reg_width(dst, control)?;
+        Self::check_bmi_rm_width(dst, &src)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&control),
+            &src,
+            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `bzhi r32/r64, r/m32/r/m64, r32/r64` — VEX.NDS.LZ.0F38.F5 /r.
+    #[inline]
+    pub fn bzhi(&mut self, dst: Reg, src: impl Into<RegMem>, index: Reg) -> Result<()> {
+        let src = src.into();
+        Self::check_bmi_reg_width(dst, index)?;
+        Self::check_bmi_rm_width(dst, &src)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&index),
+            &src,
+            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+            0xF5,
+            None,
+        )
+    }
+
+    /// `pdep r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.F2.0F38.F5 /r.
+    #[inline]
+    pub fn pdep(&mut self, dst: Reg, src: Reg, mask: impl Into<RegMem>) -> Result<()> {
+        let mask = mask.into();
+        Self::check_bmi_reg_width(dst, src)?;
+        Self::check_bmi_rm_width(dst, &mask)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&src),
+            &mask,
+            Self::bmi_vex_flags(dst, TypeFlags::T_F2)?,
+            0xF5,
+            None,
+        )
+    }
+
+    /// `pext r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.F3.0F38.F5 /r.
+    #[inline]
+    pub fn pext(&mut self, dst: Reg, src: Reg, mask: impl Into<RegMem>) -> Result<()> {
+        let mask = mask.into();
+        Self::check_bmi_reg_width(dst, src)?;
+        Self::check_bmi_rm_width(dst, &mask)?;
+        self.buf.op_vex(
+            &dst,
+            Some(&src),
+            &mask,
+            Self::bmi_vex_flags(dst, TypeFlags::T_F3)?,
+            0xF5,
+            None,
+        )
+    }
+
+    /// Emit an EVEX narrowing move whose architectural destination is encoded
+    /// in ModRM.r/m and whose source is encoded in ModRM.reg.
+    #[inline]
+    fn vpmov_narrow_xmm(&mut self, dst: Reg, src: Reg, opcode: u8) -> Result<()> {
+        if !dst.is_xmm() || !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &src,
+            None,
+            &RegMem::Reg(dst),
+            TypeFlags::T_F3 | TypeFlags::T_0F38 | TypeFlags::T_MUST_EVEX | TypeFlags::T_W0,
+            opcode,
+            None,
+        )
+    }
+
+    /// `vpmovwb xmm, xmm` — EVEX.128.F3.0F38.W0 30 /r.
+    #[inline]
+    pub fn vpmovwb(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_narrow_xmm(dst, src, 0x30)
+    }
+
+    /// `vpmovdw xmm, xmm` — EVEX.128.F3.0F38.W0 33 /r.
+    #[inline]
+    pub fn vpmovdw(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_narrow_xmm(dst, src, 0x33)
+    }
+
+    /// `vpmovqd xmm, xmm` — EVEX.128.F3.0F38.W0 35 /r.
+    #[inline]
+    pub fn vpmovqd(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_narrow_xmm(dst, src, 0x35)
+    }
+
+    /// Emit an EVEX vector sign-bit to opmask move.
+    #[inline]
+    fn vpmov_to_mask(&mut self, dst: Reg, src: Reg, flags: TypeFlags, opcode: u8) -> Result<()> {
+        if !dst.is_opmask() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_F3 | TypeFlags::T_0F38 | TypeFlags::T_MUST_EVEX | TypeFlags::T_YMM | flags,
+            opcode,
+            None,
+        )
+    }
+
+    /// `vpmovb2m k, xmm/ymm/zmm` — EVEX.F3.0F38.W0 29 /r.
+    #[inline]
+    pub fn vpmovb2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_to_mask(dst, src, TypeFlags::T_W0, 0x29)
+    }
+
+    /// `vpmovq2m k, xmm/ymm/zmm` — EVEX.F3.0F38.W1 39 /r.
+    #[inline]
+    pub fn vpmovq2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_to_mask(dst, src, TypeFlags::T_EW1, 0x39)
+    }
+
     // ── MOVSS / MOVSD (special: reg,reg uses different pattern than reg,mem) ─
     /// `movss xmm, xmm/m32` — F3 0F 10 /r
     #[inline]

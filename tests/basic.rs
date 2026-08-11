@@ -238,6 +238,82 @@ fn test_ror_rdx_cl() {
 }
 
 #[test]
+fn test_rorx_ecx_eax_imm() {
+    // rorx ecx, eax, 7 → C4 E3 7B F0 C8 07
+    let code = assemble(|a| a.rorx(ECX, EAX, 7));
+    assert_eq!(code, [0xC4, 0xE3, 0x7B, 0xF0, 0xC8, 0x07]);
+}
+
+#[test]
+fn test_rorx_r9_r10_imm() {
+    // rorx r9, r10, 13 → C4 43 FB F0 CA 0D
+    let code = assemble(|a| a.rorx(R9, R10, 13));
+    assert_eq!(code, [0xC4, 0x43, 0xFB, 0xF0, 0xCA, 0x0D]);
+}
+
+#[test]
+fn test_bmi1_bmi2_three_operand_encodings() {
+    let code = assemble(|a| {
+        a.shlx(ECX, EAX, EDX)?;
+        a.shlx(R9, R10, R11)?;
+        a.shrx(ECX, EAX, EDX)?;
+        a.sarx(R9, R10, R11)?;
+        a.andn(ECX, EAX, EDX)?;
+        a.andn(R9, R10, R11)?;
+        a.bextr(ECX, EAX, EDX)?;
+        a.bextr(R9, R10, R11)?;
+        a.pdep(ECX, EAX, EDX)?;
+        a.pext(R9, R10, R11)
+    });
+    assert_eq!(
+        code,
+        [
+            0xC4, 0xE2, 0x69, 0xF7, 0xC8, 0xC4, 0x42, 0xA1, 0xF7, 0xCA, 0xC4, 0xE2, 0x6B, 0xF7,
+            0xC8, 0xC4, 0x42, 0xA2, 0xF7, 0xCA, 0xC4, 0xE2, 0x78, 0xF2, 0xCA, 0xC4, 0x42, 0xA8,
+            0xF2, 0xCB, 0xC4, 0xE2, 0x68, 0xF7, 0xC8, 0xC4, 0x42, 0xA0, 0xF7, 0xCA, 0xC4, 0xE2,
+            0x7B, 0xF5, 0xCA, 0xC4, 0x42, 0xAA, 0xF5, 0xCB,
+        ]
+    );
+}
+
+#[test]
+fn test_vpmov_asymmetric_destination_encodings() {
+    let code = assemble(|a| {
+        a.vpmovwb(XMM1, XMM2)?;
+        a.vpmovwb(XMM8, XMM9)?;
+        a.vpmovdw(XMM3, XMM4)?;
+        a.vpmovdw(XMM10, XMM11)?;
+        a.vpmovqd(XMM5, XMM6)?;
+        a.vpmovqd(XMM12, XMM13)
+    });
+    assert_eq!(
+        code,
+        [
+            0x62, 0xF2, 0x7E, 0x08, 0x30, 0xD1, 0x62, 0x52, 0x7E, 0x08, 0x30, 0xC8, 0x62, 0xF2,
+            0x7E, 0x08, 0x33, 0xE3, 0x62, 0x52, 0x7E, 0x08, 0x33, 0xDA, 0x62, 0xF2, 0x7E, 0x08,
+            0x35, 0xF5, 0x62, 0x52, 0x7E, 0x08, 0x35, 0xEC,
+        ]
+    );
+}
+
+#[test]
+fn test_vpmov_vector_sign_bits_to_opmask_encodings() {
+    let code = assemble(|a| {
+        a.vpmovb2m(K1, XMM2)?;
+        a.vpmovb2m(K3, XMM9)?;
+        a.vpmovq2m(K2, XMM4)?;
+        a.vpmovq2m(K5, XMM11)
+    });
+    assert_eq!(
+        code,
+        [
+            0x62, 0xF2, 0x7E, 0x08, 0x29, 0xCA, 0x62, 0xD2, 0x7E, 0x08, 0x29, 0xD9, 0x62, 0xF2,
+            0xFE, 0x08, 0x39, 0xD4, 0x62, 0xD2, 0xFE, 0x08, 0x39, 0xEB,
+        ]
+    );
+}
+
+#[test]
 fn test_bt_eax_imm() {
     // bt eax, 5 → 0F BA E0 05
     let code = assemble(|a| a.bt_imm(EAX, 5));
@@ -381,6 +457,19 @@ fn test_imul_eax_ecx() {
     // imul eax, ecx → 0F AF C1
     let code = assemble(|a| a.imul(EAX, ECX));
     assert_eq!(code, [0x0F, 0xAF, 0xC1]);
+}
+
+#[test]
+fn test_bzhi_64_and_extended_32() {
+    // Encodings verified against GNU as 2.45.
+    let code = assemble(|a| {
+        a.bzhi(RAX, RBX, RCX)?;
+        a.bzhi(R8D, R9D, R10D)
+    });
+    assert_eq!(
+        code,
+        [0xC4, 0xE2, 0xF0, 0xF5, 0xC3, 0xC4, 0x42, 0x28, 0xF5, 0xC1]
+    );
 }
 
 #[test]
