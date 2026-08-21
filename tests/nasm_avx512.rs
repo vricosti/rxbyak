@@ -92,6 +92,47 @@ fn test_nasm_evex_int_ops() {
     compare_nasm_batch(&nasm, 64, insns);
 }
 
+#[test]
+fn test_nasm_packed_qword_immediate_shifts() {
+    let nasm = skip_if_no_nasm!();
+    let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
+        (
+            "vpsllq xmm3, xmm4, 7".into(),
+            Box::new(|a| a.vpsllq_imm(XMM3, XMM4, 7)),
+        ),
+        (
+            "vpsllq xmm11, xmm12, 7".into(),
+            Box::new(|a| a.vpsllq_imm(XMM11, XMM12, 7)),
+        ),
+        (
+            "vpsllq ymm17, ymm18, 31".into(),
+            Box::new(|a| a.vpsllq_imm(YMM17, YMM18, 31)),
+        ),
+        (
+            "vpsllq zmm29, zmm30, 32".into(),
+            Box::new(|a| a.vpsllq_imm(ZMM29, ZMM30, 32)),
+        ),
+        (
+            "vpsraq xmm5, xmm6, 32".into(),
+            Box::new(|a| a.vpsraq_imm(XMM5, XMM6, 32)),
+        ),
+        (
+            "vpsraq xmm17, xmm18, 32".into(),
+            Box::new(|a| a.vpsraq_imm(XMM17, XMM18, 32)),
+        ),
+        (
+            "vpsraq ymm21, ymm22, 17".into(),
+            Box::new(|a| a.vpsraq_imm(YMM21, YMM22, 17)),
+        ),
+        (
+            "vpsraq zmm25, zmm26, 63".into(),
+            Box::new(|a| a.vpsraq_imm(ZMM25, ZMM26, 63)),
+        ),
+    ];
+
+    compare_nasm_batch(&nasm, 64, insns);
+}
+
 // ─── EVEX-only instructions (vpandd, vpord, vpxord, etc.) ───────
 
 #[test]

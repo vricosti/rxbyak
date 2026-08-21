@@ -4444,10 +4444,13 @@ impl CodeAssembler {
         dst: Reg,
         src: Reg,
         opcode_extension: u8,
+        type_flags: TypeFlags,
         opcode: u8,
         imm: u8,
     ) -> Result<()> {
-        let same_width = (dst.is_xmm() && src.is_xmm()) || (dst.is_ymm() && src.is_ymm());
+        let same_width = (dst.is_xmm() && src.is_xmm())
+            || (dst.is_ymm() && src.is_ymm())
+            || (dst.is_zmm() && src.is_zmm());
         if !same_width {
             return Err(Error::BadCombination);
         }
@@ -4455,7 +4458,7 @@ impl CodeAssembler {
             &Reg::xmm(opcode_extension),
             Some(&dst),
             &RegMem::Reg(src),
-            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_YMM,
+            type_flags,
             opcode,
             Some(imm),
         )
@@ -4464,19 +4467,91 @@ impl CodeAssembler {
     /// `vpsllw xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 71 /6 ib
     #[inline]
     pub fn vpsllw_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
-        self.vex_packed_shift_imm(dst, src, 6, 0x71, imm)
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            6,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_MEM_EVEX,
+            0x71,
+            imm,
+        )
     }
 
     /// `vpsrlw xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 71 /2 ib
     #[inline]
     pub fn vpsrlw_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
-        self.vex_packed_shift_imm(dst, src, 2, 0x71, imm)
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            2,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_MEM_EVEX,
+            0x71,
+            imm,
+        )
     }
 
     /// `vpsrld xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 72 /2 ib
     #[inline]
     pub fn vpsrld_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
-        self.vex_packed_shift_imm(dst, src, 2, 0x72, imm)
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            2,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_B32
+                | TypeFlags::T_MEM_EVEX,
+            0x72,
+            imm,
+        )
+    }
+
+    /// `vpsllq xmm/ymm/zmm, xmm/ymm/zmm, imm8` — VEX/EVEX.66.0F.W1 73 /6 ib
+    #[inline]
+    pub fn vpsllq_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            6,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_B64
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
+    /// `vpsraq xmm/ymm/zmm, xmm/ymm/zmm, imm8` — EVEX.66.0F.W1 72 /4 ib
+    #[inline]
+    pub fn vpsraq_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            4,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B64,
+            0x72,
+            imm,
+        )
     }
 
     /// `pslld xmm, imm8` — 66 0F 72 /6 ib
