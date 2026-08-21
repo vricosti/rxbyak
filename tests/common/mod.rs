@@ -1,3 +1,8 @@
+// Every integration-test crate compiles this shared module independently and
+// intentionally uses only the operand tables and NASM helpers relevant to that
+// test family.
+#![allow(dead_code)]
+
 use rxbyak::*;
 use std::path::PathBuf;
 use std::process::Command;

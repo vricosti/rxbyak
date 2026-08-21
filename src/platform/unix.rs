@@ -6,15 +6,14 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     // emitted and are made executable later through the protection helpers.
     // RWX MAP_JIT mappings fault on Apple Silicon when per-thread JIT write
     // protection is enabled.
-    let mut flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+    #[cfg(not(target_os = "macos"))]
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
 
     #[cfg(target_os = "macos")]
-    {
-        // Hardened macOS processes require MAP_JIT for writable executable
-        // mappings. This is harmless for non-hardened runs and keeps the
-        // x64/Rosetta path from failing before the backend can initialize.
-        flags |= libc::MAP_JIT;
-    }
+    // Hardened macOS processes require MAP_JIT for writable executable
+    // mappings. This is harmless for non-hardened runs and keeps the
+    // x64/Rosetta path from failing before the backend can initialize.
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_JIT;
 
     let ptr = unsafe {
         libc::mmap(
