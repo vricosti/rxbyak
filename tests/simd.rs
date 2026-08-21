@@ -555,3 +555,27 @@ fn test_vaddps_zmm_k1_z() {
     let code = assemble(|a| a.vaddps(ZMM0.k(1).z(), ZMM1, ZMM2));
     assert_eq!(code, [0x62, 0xF1, 0x74, 0xC9, 0x58, 0xC2]);
 }
+
+#[test]
+fn test_vex_packed_word_shift_immediates() {
+    assert_eq!(
+        assemble(|a| a.vpsrlw_imm(XMM1, XMM2, 4)),
+        [0xC5, 0xF1, 0x71, 0xD2, 0x04]
+    );
+    assert_eq!(
+        assemble(|a| a.vpsllw_imm(XMM3, XMM4, 7)),
+        [0xC5, 0xE1, 0x71, 0xF4, 0x07]
+    );
+}
+
+#[test]
+fn test_vex_packed_shift_immediates_support_ymm_and_extended_registers() {
+    assert_eq!(
+        assemble(|a| a.vpsllw_imm(YMM11, YMM12, 7)),
+        [0xC4, 0xC1, 0x25, 0x71, 0xF4, 0x07]
+    );
+    assert_eq!(
+        assemble(|a| a.vpsrld_imm(XMM13, XMM14, 8)),
+        [0xC4, 0xC1, 0x11, 0x72, 0xD6, 0x08]
+    );
+}

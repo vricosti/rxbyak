@@ -4435,6 +4435,50 @@ impl CodeAssembler {
     }
 
     // ── PSLL / PSRL / PSRA immediate shifts ─────────────────
+    /// Encode the VEX.NDD packed-shift immediate form. Unlike the register-count
+    /// form, the ModRM.reg field is an opcode extension and the destination is
+    /// encoded in VEX.vvvv.
+    #[inline]
+    fn vex_packed_shift_imm(
+        &mut self,
+        dst: Reg,
+        src: Reg,
+        opcode_extension: u8,
+        opcode: u8,
+        imm: u8,
+    ) -> Result<()> {
+        let same_width = (dst.is_xmm() && src.is_xmm()) || (dst.is_ymm() && src.is_ymm());
+        if !same_width {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &Reg::xmm(opcode_extension),
+            Some(&dst),
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_YMM,
+            opcode,
+            Some(imm),
+        )
+    }
+
+    /// `vpsllw xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 71 /6 ib
+    #[inline]
+    pub fn vpsllw_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(dst, src, 6, 0x71, imm)
+    }
+
+    /// `vpsrlw xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 71 /2 ib
+    #[inline]
+    pub fn vpsrlw_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(dst, src, 2, 0x71, imm)
+    }
+
+    /// `vpsrld xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 72 /2 ib
+    #[inline]
+    pub fn vpsrld_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(dst, src, 2, 0x72, imm)
+    }
+
     /// `pslld xmm, imm8` — 66 0F 72 /6 ib
     #[inline]
     pub fn pslld_imm(&mut self, dst: Reg, imm: u8) -> Result<()> {
