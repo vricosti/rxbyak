@@ -856,6 +856,64 @@ impl CodeBuffer {
         Ok(())
     }
 
+    /// Encode Xbyak's Key Locker SSE/APX memory form.
+    #[allow(clippy::too_many_arguments)]
+    #[inline]
+    pub(crate) fn op_sse_apx(
+        &mut self,
+        x: &Reg,
+        op: &RegMem,
+        type1: TypeFlags,
+        code1: u8,
+        type2: TypeFlags,
+        code2: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        if x.get_idx() <= 15
+            && op.has_rex2()
+            && self.op_roo(
+                &Reg::default(),
+                op,
+                &RegMem::Reg(*x),
+                type2,
+                code2,
+                u8::from(imm8.is_some()),
+                None,
+            )?
+        {
+            if let Some(imm) = imm8 {
+                self.db(imm)?;
+            }
+            return Ok(());
+        }
+        if !x.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.op_sse(x, op, type1, code1, imm8)
+    }
+
+    /// Encode Xbyak's Key Locker ENCODEKEY legacy/APX forms.
+    #[inline]
+    pub(crate) fn op_encode_key(&mut self, r1: &Reg, r2: &Reg, code1: u8, code2: u8) -> Result<()> {
+        if r1.get_idx() < 8 && r2.get_idx() < 8 {
+            self.db(0xF3)?;
+            self.db(0x0F)?;
+            self.db(0x38)?;
+            self.db(code1)?;
+            return self.set_modrm(3, r1.get_idx(), r2.get_idx());
+        }
+        self.op_roo(
+            &Reg::default(),
+            &RegMem::Reg(*r2),
+            &RegMem::Reg(*r1),
+            TypeFlags::T_MUST_EVEX | TypeFlags::T_F3,
+            code2,
+            0,
+            None,
+        )?;
+        Ok(())
+    }
+
     /// Main VEX/EVEX dispatch for SIMD instructions (opVex in C++).
     ///
     /// `r` is the register field of ModRM.

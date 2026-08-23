@@ -5157,6 +5157,88 @@ impl CodeAssembler {
         )
     }
 
+    fn aes_kl(&mut self, dst: Reg, addr: Address, opcode: u8) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse_apx(
+            &dst,
+            &RegMem::Mem(addr),
+            TypeFlags::T_F3 | TypeFlags::T_0F38,
+            opcode,
+            TypeFlags::T_F3 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            None,
+        )
+    }
+
+    /// `aesdec128kl xmm, m384` — decrypt a 128-bit Key Locker handle.
+    #[inline]
+    pub fn aesdec128kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDD)
+    }
+
+    /// `aesdec256kl xmm, m512` — decrypt a 256-bit Key Locker handle.
+    #[inline]
+    pub fn aesdec256kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDF)
+    }
+
+    /// `aesdecwide128kl m384` — wide 128-bit Key Locker decryption.
+    #[inline]
+    pub fn aesdecwide128kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(1), addr, 0xD8)
+    }
+
+    /// `aesdecwide256kl m512` — wide 256-bit Key Locker decryption.
+    #[inline]
+    pub fn aesdecwide256kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(3), addr, 0xD8)
+    }
+
+    /// `aesenc128kl xmm, m384` — encrypt a 128-bit Key Locker handle.
+    #[inline]
+    pub fn aesenc128kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDC)
+    }
+
+    /// `aesenc256kl xmm, m512` — encrypt a 256-bit Key Locker handle.
+    #[inline]
+    pub fn aesenc256kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDE)
+    }
+
+    /// `aesencwide128kl m384` — wide 128-bit Key Locker encryption.
+    #[inline]
+    pub fn aesencwide128kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(0), addr, 0xD8)
+    }
+
+    /// `aesencwide256kl m512` — wide 256-bit Key Locker encryption.
+    #[inline]
+    pub fn aesencwide256kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(2), addr, 0xD8)
+    }
+
+    fn encode_key(&mut self, src: Reg, dst: Reg, code1: u8, code2: u8) -> Result<()> {
+        if !src.is_reg_bit(32) || !dst.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_encode_key(&src, &dst, code1, code2)
+    }
+
+    /// `encodekey128 r32, r32` — encode a 128-bit Key Locker key.
+    #[inline]
+    pub fn encodekey128(&mut self, src: Reg, dst: Reg) -> Result<()> {
+        self.encode_key(src, dst, 0xFA, 0xDA)
+    }
+
+    /// `encodekey256 r32, r32` — encode a 256-bit Key Locker key.
+    #[inline]
+    pub fn encodekey256(&mut self, src: Reg, dst: Reg) -> Result<()> {
+        self.encode_key(src, dst, 0xFB, 0xDB)
+    }
+
     /// Emit an EVEX narrowing move whose architectural destination is encoded
     /// in ModRM.r/m and whose source is encoded in ModRM.reg.
     #[inline]

@@ -397,12 +397,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 772
+  rxbyak handwritten public instruction methods: 782
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1651
-  Xbyak names not matched:                        228
+  Xbyak names matched after Rust API mapping:    1661
+  Xbyak names not matched:                        218
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    228
+    missing encoder/API names:                    218
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -644,3 +644,18 @@ public. Rust exposes Xbyak's overloaded three-operand ADCX/ADOX forms as
 Exact-byte regressions generated with Xbyak v7.40 cover legacy, VEX, APX,
 EGPR, NF, register, memory, immediate and invalid-width paths. No
 binary-layout-bearing type changes in this slice.
+
+The Key Locker slice ports xbyak.h `opEncodeKey` and `opSSE_APX` in encoder
+ownership, then exposes all AESENC/AESDEC 128/256 and wide forms plus
+ENCODEKEY128/256. ENCODEKEY preserves Xbyak's exact threshold: r0-r7 use the
+legacy F3.0F38 opcode, while either operand at r8 or above selects the EVEX
+form. Key Locker AES uses legacy SSE for ordinary addresses and EVEX-legacy
+only when the address itself requires REX2.
+
+The post-port source re-read also preserves an unusual upstream consequence
+of `opSSE_APX` ordering: YMM/ZMM objects passed through Xbyak's Xmm base class
+are rejected on the legacy fallback, but are encoded when an EGPR address
+takes the APX branch before `isXMM_XMMorMEM` validation. Focused regressions
+cover that distinction, every public mnemonic, XMM16 rejection, both address
+paths and the four ENCODEKEY register thresholds. No binary-layout-bearing
+type changes in this slice.
