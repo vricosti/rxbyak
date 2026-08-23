@@ -2184,6 +2184,54 @@ impl CodeAssembler {
         )
     }
 
+    /// `vpmaskmovd xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vpmaskmovd(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x8C,
+            None,
+        )
+    }
+
+    /// `vpmaskmovd m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vpmaskmovd_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x8E,
+            None,
+        )
+    }
+
+    /// `vpmaskmovq xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vpmaskmovq(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W1 | TypeFlags::T_YMM,
+            0x8C,
+            None,
+        )
+    }
+
+    /// `vpmaskmovq m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vpmaskmovq_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W1 | TypeFlags::T_YMM,
+            0x8E,
+            None,
+        )
+    }
+
     fn vmov_half_ps(&mut self, dst: Reg, merge: Reg, src: Reg, opcode: u8) -> Result<()> {
         if !src.is_xmm() {
             return Err(Error::BadCombination);
@@ -2267,6 +2315,74 @@ impl CodeAssembler {
                 | TypeFlags::T_MUST_EVEX
                 | TypeFlags::T_M_K,
             0x8A,
+            None,
+        )
+    }
+
+    /// `vpcompressb xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N1
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x63,
+            None,
+        )
+    }
+
+    /// `vpcompressd xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8B,
+            None,
+        )
+    }
+
+    /// `vpcompressq xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressq(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8B,
+            None,
+        )
+    }
+
+    /// `vpcompressw xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N2
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x63,
             None,
         )
     }
@@ -6037,6 +6153,50 @@ impl CodeAssembler {
         self.vpmov_to_mask(dst, src, TypeFlags::T_EW1, 0x39)
     }
 
+    /// `vpmovd2m k, xmm/ymm/zmm` — EVEX.F3.0F38.W0 39 /r.
+    #[inline]
+    pub fn vpmovd2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_to_mask(dst, src, TypeFlags::T_W0, 0x39)
+    }
+
+    /// `vpmovw2m k, xmm/ymm/zmm` — EVEX.F3.0F38.W1 29 /r.
+    #[inline]
+    pub fn vpmovw2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_to_mask(dst, src, TypeFlags::T_EW1, 0x29)
+    }
+
+    /// Emit an EVEX opmask-to-vector expansion.
+    #[inline]
+    fn vpmov_from_mask(&mut self, dst: Reg, src: Reg, flags: TypeFlags, opcode: u8) -> Result<()> {
+        if !dst.is_simd() || !src.is_opmask() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_F3 | TypeFlags::T_0F38 | TypeFlags::T_MUST_EVEX | TypeFlags::T_YMM | flags,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vpmovm2b(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_W0, 0x28)
+    }
+
+    pub fn vpmovm2d(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_W0, 0x38)
+    }
+
+    pub fn vpmovm2q(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_EW1, 0x38)
+    }
+
+    pub fn vpmovm2w(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_EW1, 0x28)
+    }
+
     // ── MOVSS / MOVSD (special: reg,reg uses different pattern than reg,mem) ─
     /// `movss xmm, xmm/m32` — F3 0F 10 /r
     #[inline]
@@ -8942,12 +9102,18 @@ impl CodeAssembler {
         )
     }
 
-    /// `vpmovssdb xmm/m, xmm/ymm/zmm`
-    pub fn vpmovssdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+    fn vpmov_narrow_evex(
+        &mut self,
+        dst: impl Into<RegMem>,
+        src: Reg,
+        width: TypeFlags,
+        opcode: u8,
+        mode: bool,
+    ) -> Result<()> {
         self.op_vmov(
             dst.into(),
             src,
-            TypeFlags::T_N4
+            width
                 | TypeFlags::T_N_VL
                 | TypeFlags::T_F3
                 | TypeFlags::T_0F38
@@ -8955,9 +9121,89 @@ impl CodeAssembler {
                 | TypeFlags::T_YMM
                 | TypeFlags::T_MUST_EVEX
                 | TypeFlags::T_M_K,
-            0x41,
-            false,
+            opcode,
+            mode,
         )
+    }
+
+    /// `vpmovdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x31, false)
+    }
+
+    /// `vpmovqb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovqb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N2, 0x32, false)
+    }
+
+    /// `vpmovqw xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovqw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x34, false)
+    }
+
+    /// `vpmovsdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovsdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x21, false)
+    }
+
+    /// `vpmovsdw xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovsdw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x23, true)
+    }
+
+    /// `vpmovsqb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovsqb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N2, 0x22, false)
+    }
+
+    /// `vpmovsqd xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovsqd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x25, true)
+    }
+
+    /// `vpmovsqw xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovsqw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x24, false)
+    }
+
+    /// `vpmovswb xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovswb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x20, true)
+    }
+
+    /// `vpmovusdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovusdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x11, false)
+    }
+
+    /// `vpmovusdw xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovusdw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x13, true)
+    }
+
+    /// `vpmovusqb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovusqb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N2, 0x12, false)
+    }
+
+    /// `vpmovusqd xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovusqd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x15, true)
+    }
+
+    /// `vpmovusqw xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovusqw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x14, false)
+    }
+
+    /// `vpmovuswb xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovuswb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x10, true)
+    }
+
+    /// `vpmovssdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovssdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x41, false)
     }
 
     /// `vunpackb xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`

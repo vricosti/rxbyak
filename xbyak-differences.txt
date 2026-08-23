@@ -409,12 +409,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 836
+  rxbyak handwritten public instruction methods: 865
   rxbyak generated/macro unique methods:         1162
-  Xbyak names matched after Rust API mapping:    1790
-  Xbyak names not matched:                         89
+  Xbyak names matched after Rust API mapping:    1817
+  Xbyak names not matched:                         62
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                     89
+    missing encoder/API names:                     62
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -733,3 +733,17 @@ every newly exposed form were generated with Xbyak v7.40 and cover XMM, YMM,
 ZMM, extended registers, complex addresses, masked register destinations and
 masked memory destinations. No binary-layout-bearing type crosses an external
 ABI in this slice.
+
+The EVEX packed-integer slice ports both VPMASKMOVD/VPMASKMOVQ directions,
+VPCOMPRESSB/D/Q/W, VPMOVD2M/VPMOVW2M, all four VPMOVM2* expansions, and all
+15 previously missing truncating or signed/unsigned saturating VPMOV* forms.
+Memory-destination mask-move overloads use `_store`, consistently with the
+other Rust overload mappings. Each public wrapper keeps Xbyak's literal width,
+prefix, map, opcode and `opVmov` mode next to the mnemonic; only the exact
+upstream `opVmov` common flag assembly is shared by `vpmov_narrow_evex`.
+
+Differential regressions generated with Xbyak v7.40 cover every new mnemonic,
+both VPMASKMOV directions, vector/opmask conversions, masked register and
+memory destinations, and both `opVmov` width modes. Focused invalid-class and
+invalid-width cases retain the type constraints otherwise supplied by Xbyak's
+C++ parameter types. No binary-layout-bearing type changes in this slice.
