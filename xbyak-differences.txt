@@ -474,3 +474,16 @@ Windows test run for byte-level execution evidence.
 The Win64 implementation and tests type-check with
 `cargo check --target x86_64-pc-windows-gnu --tests`; the local environment
 does not provide the MinGW linker needed to execute or link that test target.
+
+The Cpu slice now follows Xbyak v7.40 through feature ID 101. It adds
+AMX_COMPLEX, ACE, AVX10_V1_AUX and AVX10_V2_AUX detection, tile-palette and
+ACE-version queries, the AVX10 auxiliary subleaf, and Xbyak's guarded 0x1e
+subleaf traversal. Feature constants retired by upstream (the Xeon Phi
+AVX-512 groups, PREFETCHWT1, and AMX_TRANSPOSE) are no longer exposed or set.
+The Apple on-demand AVX-512 rule and Intel cache SMT-width update also match
+the current C++ ordering. Public CPUID/XFEATURE helpers and fallible cache/core
+queries cover the remaining Cpu API surface using Rust Result in place of
+Xbyak exceptions. A native differential probe compared all feature bits
+0-101, family/model fields, topology counts, every data-cache entry, and the
+three version/palette values with Xbyak v7.40; all values matched on the audit
+host. CpuTopology remains a separate structural/platform audit slice.
