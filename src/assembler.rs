@@ -6798,6 +6798,177 @@ impl CodeAssembler {
         )
     }
 
+    fn vector_extension_reg(like: Reg, index: u8) -> Result<Reg> {
+        if like.is_zmm() {
+            Ok(Reg::zmm(index))
+        } else if like.is_ymm() {
+            Ok(Reg::ymm(index))
+        } else if like.is_xmm() {
+            Ok(Reg::xmm(index))
+        } else {
+            Err(Error::BadCombination)
+        }
+    }
+
+    fn vex_vector_shift_imm(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        extension: u8,
+        type_: TypeFlags,
+        opcode: u8,
+        imm: u8,
+    ) -> Result<()> {
+        let extension = Self::vector_extension_reg(dst, extension)?;
+        self.op_avx_x_x_xm(extension, dst, src, type_, opcode, Some(imm))
+    }
+
+    /// `vpslldq xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`.
+    pub fn vpslldq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_shift_imm(
+            dst,
+            src,
+            7,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
+    /// `vpsrldq xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`.
+    pub fn vpsrldq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_shift_imm(
+            dst,
+            src,
+            3,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
+    fn vex_vector_rotate_imm(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        extension: u8,
+        width: TypeFlags,
+        imm: u8,
+    ) -> Result<()> {
+        self.vex_vector_shift_imm(
+            dst,
+            src,
+            extension,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | width
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | if width == TypeFlags::T_W0 {
+                    TypeFlags::T_B32
+                } else {
+                    TypeFlags::T_B64
+                },
+            0x72,
+            imm,
+        )
+    }
+
+    pub fn vprold(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 1, TypeFlags::T_W0, imm)
+    }
+
+    pub fn vprolq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 1, TypeFlags::T_EW1, imm)
+    }
+
+    pub fn vprord(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 0, TypeFlags::T_W0, imm)
+    }
+
+    pub fn vprorq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 0, TypeFlags::T_EW1, imm)
+    }
+
+    fn vshuffle_x4(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        width: TypeFlags,
+        opcode: u8,
+        imm: u8,
+    ) -> Result<()> {
+        if !(dst.is_ymm() || dst.is_zmm()) || !(merge.is_ymm() || merge.is_zmm()) {
+            return Err(Error::BadCombination);
+        }
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_66
+                | TypeFlags::T_0F3A
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | width
+                | if width == TypeFlags::T_W0 {
+                    TypeFlags::T_B32
+                } else {
+                    TypeFlags::T_B64
+                },
+            opcode,
+            Some(imm),
+        )
+    }
+
+    pub fn vshuff32x4(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_W0, 0x23, imm)
+    }
+
+    pub fn vshuff64x2(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_EW1, 0x23, imm)
+    }
+
+    pub fn vshufi32x4(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_W0, 0x43, imm)
+    }
+
+    pub fn vshufi64x2(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_EW1, 0x43, imm)
+    }
+
     /// `vpsllw xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 71 /6 ib
     #[inline]
     pub fn vpsllw_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
