@@ -222,7 +222,10 @@ stosw
 sub
 test
 tzcnt
+tpause
 ud2
+umonitor
+umwait
 xadd
 xchg
 xor_

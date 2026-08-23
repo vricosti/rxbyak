@@ -3004,6 +3004,48 @@ impl CodeAssembler {
         self.buf.db(0xF3)?;
         self.buf.db(0x90)
     }
+    /// `tpause r32` — 66 0F AE /6, with REX2 for r16d-r31d.
+    #[inline]
+    pub fn tpause(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(32) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg,
+            TypeFlags::T_66 | TypeFlags::T_0F,
+            0xAE,
+        )
+    }
+    /// `umonitor r16/r32/r64` — F3 0F AE /6.
+    #[inline]
+    pub fn umonitor(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if reg.is_bit(32) {
+            self.buf.db(0x67)?;
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg.cvt32()?,
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            0xAE,
+        )
+    }
+    /// `umwait r32` — F2 0F AE /6, with REX2 for r16d-r31d.
+    #[inline]
+    pub fn umwait(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(32) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg,
+            TypeFlags::T_F2 | TypeFlags::T_0F,
+            0xAE,
+        )
+    }
     #[inline]
     pub fn lock(&mut self) -> Result<()> {
         self.buf.db(0xF0)

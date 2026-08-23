@@ -174,6 +174,28 @@ fn test_xbyak_7_39_1_egpr_move_and_conversion_fixes() {
 }
 
 #[test]
+fn test_xbyak_7_37_2_user_wait_instructions_support_egprs() {
+    let code = assemble(|a| {
+        a.tpause(EAX)?;
+        a.tpause(R16D)?;
+        a.umwait(ECX)?;
+        a.umwait(R17D)?;
+        a.umonitor(AX)?;
+        a.umonitor(EAX)?;
+        a.umonitor(RAX)?;
+        a.umonitor(R18)
+    });
+    assert_eq!(
+        code,
+        [
+            0x66, 0x0F, 0xAE, 0xF0, 0x66, 0xD5, 0x90, 0xAE, 0xF0, 0xF2, 0x0F, 0xAE, 0xF1, 0xF2,
+            0xD5, 0x90, 0xAE, 0xF1, 0xF3, 0x0F, 0xAE, 0xF0, 0x67, 0xF3, 0x0F, 0xAE, 0xF0, 0xF3,
+            0x0F, 0xAE, 0xF0, 0xF3, 0xD5, 0x90, 0xAE, 0xF2,
+        ]
+    );
+}
+
+#[test]
 fn test_push_pop_rax() {
     let code = assemble(|a| {
         a.push(RAX)?;
