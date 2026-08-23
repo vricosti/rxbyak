@@ -395,18 +395,18 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 756
+  rxbyak handwritten public instruction methods: 760
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1637
-  Xbyak names not matched:                        242
+  Xbyak names matched after Rust API mapping:    1641
+  Xbyak names not matched:                        238
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    242
+    missing encoder/API names:                    238
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
 All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
 names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
-and POPFQ. The remaining 242 names require an encoder or public API audit.
+and POPFQ. The remaining 238 names require an encoder or public API audit.
 Conversely, a matched name does not prove that every Xbyak overload or
 validation rule is present. Operand-form and byte-level parity must therefore
 still be reviewed family by family.
@@ -612,3 +612,18 @@ mixed MMX/XMM, and XMM16 cases match Xbyak v7.40 differential output.
 PSHUFW deliberately retains Xbyak's generic Mmx hierarchy behavior: matching
 XMM operands are accepted and use the unprefixed opcode, while mixed XMM/MMX
 operands are rejected. No binary-layout-bearing type changes in this slice.
+
+Before porting MOVBE/MOVDIRI/MOVDIR64B, `CodeBuffer::op_mr_alt` now mirrors the
+optional `type2`/`code2` branch of xbyak.h `opMR`. It invokes the existing
+upstream-owned `op_roo`/`evexLeg` path first and falls back to legacy `op_mr`
+only when no APX/REX2 state requires the alternate form. Rust makes `code2`
+explicit instead of representing Xbyak's internal NONE sentinel. A focused
+unit test compares the legacy r8d and APX r16d MOVDIRI encoder paths against
+Xbyak v7.40 bytes. The public consumers are included in the same warning-free
+commit after this prerequisite was independently verified.
+
+MOVBE load/store, MOVDIRI, MOVDIR64B, and MOVNTDQA now expose that behavior.
+Differential tests cover both MOVBE directions, legacy r8-r15 and APX r16-r31,
+MOVDIR64B's exact `cvt32` behavior, MOVNTDQA's XMM16 rejection, and Xbyak's
+otherwise permissive derived-register behavior. No binary-layout-bearing type
+changes in this slice.

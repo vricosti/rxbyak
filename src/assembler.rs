@@ -2025,6 +2025,57 @@ impl CodeAssembler {
         }
     }
 
+    /// `movbe reg, [mem]` / `movbe [mem], reg`, including APX EGPR forms.
+    #[inline]
+    pub fn movbe(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMem>) -> Result<()> {
+        match (dst.into(), src.into()) {
+            (RegMem::Reg(reg), RegMem::Mem(addr)) => {
+                self.buf
+                    .op_mr_alt(&addr, &reg, TypeFlags::T_0F38, 0xF0, TypeFlags::T_APX, 0x60)
+            }
+            (RegMem::Mem(addr), RegMem::Reg(reg)) => {
+                self.buf
+                    .op_mr_alt(&addr, &reg, TypeFlags::T_0F38, 0xF1, TypeFlags::T_APX, 0x61)
+            }
+            _ => Err(Error::BadCombination),
+        }
+    }
+
+    /// `movdiri [mem], r32/r64`, including APX EGPR forms.
+    #[inline]
+    pub fn movdiri(&mut self, dst: Address, src: Reg) -> Result<()> {
+        if !src.is_reg() || !(src.is_bit(32) || src.is_bit(64)) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_mr_alt(&dst, &src, TypeFlags::T_0F38, 0xF9, TypeFlags::T_APX, 0xF9)
+    }
+
+    /// `movdir64b reg, [mem]`, including APX EGPR forms.
+    #[inline]
+    pub fn movdir64b(&mut self, reg: Reg, src: Address) -> Result<()> {
+        self.buf.op_mr_alt(
+            &src,
+            &reg.cvt32()?,
+            TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xF8,
+            TypeFlags::T_APX | TypeFlags::T_66,
+            0xF8,
+        )
+    }
+
+    /// `movntdqa xmm, [mem]`.
+    #[inline]
+    pub fn movntdqa(&mut self, dst: Reg, src: Address) -> Result<()> {
+        self.buf.op_sse(
+            &dst,
+            &RegMem::Mem(src),
+            TypeFlags::T_66 | TypeFlags::T_0F38,
+            0x2A,
+            None,
+        )
+    }
+
     /// `cvtpd2pi mm, xmm/m128`.
     #[inline]
     pub fn cvtpd2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {

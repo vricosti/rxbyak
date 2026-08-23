@@ -677,6 +677,34 @@ impl CodeBuffer {
         self.emit_addr(addr, r.get_idx())
     }
 
+    /// Xbyak `opMR` with its optional APX/EVEX-legacy alternate encoding.
+    #[allow(clippy::too_many_arguments)]
+    #[inline]
+    pub(crate) fn op_mr_alt(
+        &mut self,
+        addr: &Address,
+        r: &Reg,
+        type_: TypeFlags,
+        code: u8,
+        type2: TypeFlags,
+        code2: u8,
+    ) -> Result<()> {
+        if type2 != TypeFlags::NONE
+            && self.op_roo(
+                &Reg::default(),
+                &RegMem::Mem(*addr),
+                &RegMem::Reg(*r),
+                type2,
+                code2,
+                0,
+                None,
+            )?
+        {
+            return Ok(());
+        }
+        self.op_mr(addr, r, type_, code)
+    }
+
     /// Encode the memory form of LFS/LGS/LSS.
     ///
     /// This mirrors Xbyak `opLoadSeg`; unlike `op_mr`, the opcode is written
@@ -883,5 +911,43 @@ impl CodeBuffer {
             self.db(imm)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address::ptr;
+    use crate::code_array::AllocMode;
+    use crate::reg::{R16D, R8D, RAX};
+
+    #[test]
+    fn op_mr_alt_selects_legacy_or_apx_like_xbyak_7_40() {
+        let address = ptr(RAX.into());
+
+        let mut legacy = CodeBuffer::new(64, AllocMode::Alloc).unwrap();
+        legacy
+            .op_mr_alt(
+                &address,
+                &R8D,
+                TypeFlags::T_0F38,
+                0xF9,
+                TypeFlags::T_APX,
+                0xF9,
+            )
+            .unwrap();
+        assert_eq!(legacy.as_slice(), [0x44, 0x0F, 0x38, 0xF9, 0x00]);
+
+        let mut apx = CodeBuffer::new(64, AllocMode::Alloc).unwrap();
+        apx.op_mr_alt(
+            &address,
+            &R16D,
+            TypeFlags::T_0F38,
+            0xF9,
+            TypeFlags::T_APX,
+            0xF9,
+        )
+        .unwrap();
+        assert_eq!(apx.as_slice(), [0x62, 0xE4, 0x7C, 0x08, 0xF9, 0x00]);
     }
 }
