@@ -395,18 +395,18 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 744
+  rxbyak handwritten public instruction methods: 756
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1625
-  Xbyak names not matched:                        254
+  Xbyak names matched after Rust API mapping:    1637
+  Xbyak names not matched:                        242
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    254
+    missing encoder/API names:                    242
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
 All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
 names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
-and POPFQ. The remaining 254 names require an encoder or public API audit.
+and POPFQ. The remaining 242 names require an encoder or public API audit.
 Conversely, a matched name does not prove that every Xbyak overload or
 validation rule is present. Operand-form and byte-level parity must therefore
 still be reviewed family by family.
@@ -600,3 +600,15 @@ a Xbyak v7.40 probe and are retained as focused regressions. Store helpers that
 do not route through `op_sse` are outside this helper-specific prerequisite and
 remain subject to their own operand-form audit. No binary-layout-bearing type
 changes in this slice.
+
+The MMX-interoperability slice ports CVTPD2PI/CVTPI2PD/CVTPI2PS/CVTPS2PI,
+CVTTPD2PI/CVTTPS2PI, MASKMOVDQU/MASKMOVQ, MOVDQ2Q/MOVQ2DQ, MOVNTQ, and
+PSHUFW. The three operand-family predicates remain direct counterparts of
+xbyak.h `isMMX_XMMorMEM`, `isXMM_MMXorMEM`, and `isXMMorMMX_MEM`; validation
+therefore occurs before the shared `op_sse` XMM16 check in the same order as
+upstream. Register, extended-register, complex-memory, immediate, invalid-kind,
+mixed MMX/XMM, and XMM16 cases match Xbyak v7.40 differential output.
+
+PSHUFW deliberately retains Xbyak's generic Mmx hierarchy behavior: matching
+XMM operands are accepted and use the unprefixed opcode, while mixed XMM/MMX
+operands are rejected. No binary-layout-bearing type changes in this slice.

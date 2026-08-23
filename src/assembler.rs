@@ -360,6 +360,27 @@ impl CodeAssembler {
         Err(Error::BadCombination)
     }
 
+    /// Xbyak `isMMX_XMMorMEM`.
+    fn is_mmx_xmm_or_mem(dst: Reg, src: &RegMem) -> bool {
+        dst.is_mmx()
+            && (matches!(src, RegMem::Mem(_)) || matches!(src, RegMem::Reg(reg) if reg.is_xmm()))
+    }
+
+    /// Xbyak `isXMM_MMXorMEM`.
+    fn is_xmm_mmx_or_mem(dst: Reg, src: &RegMem) -> bool {
+        dst.is_xmm()
+            && (matches!(src, RegMem::Mem(_)) || matches!(src, RegMem::Reg(reg) if reg.is_mmx()))
+    }
+
+    /// Xbyak `isXMMorMMX_MEM`.
+    fn is_matching_mmx_or_xmm_mem(dst: Reg, src: &RegMem) -> bool {
+        (dst.is_mmx()
+            && (matches!(src, RegMem::Mem(_)) || matches!(src, RegMem::Reg(reg) if reg.is_mmx())))
+            || (dst.is_xmm()
+                && (matches!(src, RegMem::Mem(_))
+                    || matches!(src, RegMem::Reg(reg) if reg.is_xmm())))
+    }
+
     /// Get immediate bit size for arithmetic operations.
     fn get_imm_bit(reg_bit: u16, imm: i64) -> u8 {
         if reg_bit == 8 {
@@ -2002,6 +2023,145 @@ impl CodeAssembler {
             }
             _ => Err(Error::BadCombination),
         }
+    }
+
+    /// `cvtpd2pi mm, xmm/m128`.
+    #[inline]
+    pub fn cvtpd2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x2D, None)
+    }
+
+    /// `cvtpi2pd xmm, mm/m64`.
+    #[inline]
+    pub fn cvtpi2pd(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_xmm_mmx_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x2A, None)
+    }
+
+    /// `cvtpi2ps xmm, mm/m64`.
+    #[inline]
+    pub fn cvtpi2ps(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_xmm_mmx_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(&dst, &src, TypeFlags::T_0F, 0x2A, None)
+    }
+
+    /// `cvtps2pi mm, xmm/m64`.
+    #[inline]
+    pub fn cvtps2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(&dst, &src, TypeFlags::T_0F, 0x2D, None)
+    }
+
+    /// `cvttpd2pi mm, xmm/m128`.
+    #[inline]
+    pub fn cvttpd2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x2C, None)
+    }
+
+    /// `cvttps2pi mm, xmm/m64`.
+    #[inline]
+    pub fn cvttps2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(&dst, &src, TypeFlags::T_0F, 0x2C, None)
+    }
+
+    /// `maskmovdqu xmm, xmm`.
+    #[inline]
+    pub fn maskmovdqu(&mut self, src: Reg, mask: Reg) -> Result<()> {
+        if !src.is_xmm() || !mask.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(
+            &src,
+            &RegMem::Reg(mask),
+            TypeFlags::T_66 | TypeFlags::T_0F,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `maskmovq mm, mm`.
+    #[inline]
+    pub fn maskmovq(&mut self, src: Reg, mask: Reg) -> Result<()> {
+        if !src.is_mmx() || !mask.is_mmx() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&src, &RegMem::Reg(mask), TypeFlags::T_0F, 0xF7, None)
+    }
+
+    /// `movdq2q mm, xmm`.
+    #[inline]
+    pub fn movdq2q(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_mmx() || !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(
+            &dst,
+            &RegMem::Reg(src),
+            TypeFlags::T_F2 | TypeFlags::T_0F,
+            0xD6,
+            None,
+        )
+    }
+
+    /// `movq2dq xmm, mm`.
+    #[inline]
+    pub fn movq2dq(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_xmm() || !src.is_mmx() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(
+            &dst,
+            &RegMem::Reg(src),
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            0xD6,
+            None,
+        )
+    }
+
+    /// `movntq [mem], mm`.
+    #[inline]
+    pub fn movntq(&mut self, dst: Address, src: Reg) -> Result<()> {
+        if !src.is_mmx() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&src, &RegMem::Mem(dst), TypeFlags::T_0F, 0xE7, None)
+    }
+
+    /// `pshufw mm, mm/m64, imm8` (Xbyak also accepts matching XMM operands).
+    #[inline]
+    pub fn pshufw(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        let src = src.into();
+        if !Self::is_matching_mmx_or_xmm_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_0F, 0x70, Some(imm))
     }
 
     /// `cvtsi2ss xmm, r/m32`
