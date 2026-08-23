@@ -2017,6 +2017,28 @@ impl CodeAssembler {
         self.buf.op_vex(&x1, Some(&x2), &op, type_, code, imm8)
     }
 
+    /// Xbyak `opAVX_X_XM_IMM`: choose the index-zero merge register from the
+    /// destination vector width, then use the ordinary AVX three-operand path.
+    fn op_avx_x_xm_imm(
+        &mut self,
+        dst: Reg,
+        op: impl Into<RegMem>,
+        type_: TypeFlags,
+        code: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        let zero = if dst.is_zmm() {
+            Reg::zmm(0)
+        } else if dst.is_ymm() {
+            Reg::ymm(0)
+        } else if dst.is_xmm() {
+            Reg::xmm(0)
+        } else {
+            return Err(Error::BadCombination);
+        };
+        self.op_avx_x_x_xm(dst, zero, op, type_, code, imm8)
+    }
+
     /// AVX-512 form with opmask: (k, xmm, xmm/m)
     pub(crate) fn op_avx_k_x_xm(
         &mut self,
@@ -2034,6 +2056,313 @@ impl CodeAssembler {
             }
         }
         self.buf.op_vex(&k, Some(&x2), &op, type_, code, imm8)
+    }
+
+    // ─── Xbyak vector move/blend parity ───────────────────────
+
+    fn vblendv(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+        opcode: u8,
+    ) -> Result<()> {
+        if !mask.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_0F3A | TypeFlags::T_66 | TypeFlags::T_YMM,
+            opcode,
+            Some(mask.get_idx().wrapping_mul(16)),
+        )
+    }
+
+    /// `vblendvpd xmm/ymm, xmm/ymm, xmm/ymm/m, xmm`.
+    pub fn vblendvpd(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+    ) -> Result<()> {
+        self.vblendv(dst, merge, src, mask, 0x4B)
+    }
+
+    /// `vblendvps xmm/ymm, xmm/ymm, xmm/ymm/m, xmm`.
+    pub fn vblendvps(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+    ) -> Result<()> {
+        self.vblendv(dst, merge, src, mask, 0x4A)
+    }
+
+    /// `vpblendvb xmm/ymm, xmm/ymm, xmm/ymm/m, xmm`.
+    pub fn vpblendvb(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+    ) -> Result<()> {
+        self.vblendv(dst, merge, src, mask, 0x4C)
+    }
+
+    /// `vldmxcsr m32`.
+    pub fn vldmxcsr(&mut self, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(Reg::xmm(2), Reg::xmm(0), addr, TypeFlags::T_0F, 0xAE, None)
+    }
+
+    /// `vstmxcsr m32`.
+    pub fn vstmxcsr(&mut self, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(Reg::xmm(3), Reg::xmm(0), addr, TypeFlags::T_0F, 0xAE, None)
+    }
+
+    /// `vmaskmovdqu xmm, xmm`.
+    pub fn vmaskmovdqu(&mut self, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            data,
+            Reg::xmm(0),
+            mask,
+            TypeFlags::T_0F | TypeFlags::T_66,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `vmaskmovpd xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vmaskmovpd(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2D,
+            None,
+        )
+    }
+
+    /// `vmaskmovpd m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vmaskmovpd_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2F,
+            None,
+        )
+    }
+
+    /// `vmaskmovps xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vmaskmovps(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2C,
+            None,
+        )
+    }
+
+    /// `vmaskmovps m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vmaskmovps_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2E,
+            None,
+        )
+    }
+
+    fn vmov_half_ps(&mut self, dst: Reg, merge: Reg, src: Reg, opcode: u8) -> Result<()> {
+        if !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_0F | TypeFlags::T_EVEX | TypeFlags::T_W0,
+            opcode,
+            None,
+        )
+    }
+
+    /// `vmovhlps xmm, xmm, xmm`.
+    pub fn vmovhlps(&mut self, dst: Reg, merge: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, merge, src, 0x12)
+    }
+
+    /// Xbyak's default-operand `vmovhlps xmm, xmm` form.
+    pub fn vmovhlps_2(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, dst, src, 0x12)
+    }
+
+    /// `vmovlhps xmm, xmm, xmm`.
+    pub fn vmovlhps(&mut self, dst: Reg, merge: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, merge, src, 0x16)
+    }
+
+    /// Xbyak's default-operand `vmovlhps xmm, xmm` form.
+    pub fn vmovlhps_2(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, dst, src, 0x16)
+    }
+
+    /// `vmovntdqa xmm/ymm/zmm, m`.
+    pub fn vmovntdqa(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Mem(addr),
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_W0,
+            0x2A,
+            None,
+        )
+    }
+
+    /// `vcompresspd xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vcompresspd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8A,
+            None,
+        )
+    }
+
+    /// `vcompressps xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vcompressps(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8A,
+            None,
+        )
+    }
+
+    /// `vmovsh xmm, xmm, xmm`.
+    pub fn vmovsh(&mut self, dst: Reg, merge: Reg, src: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_N2
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX,
+            0x10,
+            None,
+        )
+    }
+
+    /// `vmovsh xmm, m16`.
+    pub fn vmovsh_load(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            Reg::xmm(0),
+            addr,
+            TypeFlags::T_N2
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX,
+            0x10,
+            None,
+        )
+    }
+
+    /// `vmovsh m16, xmm`.
+    pub fn vmovsh_store(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            addr,
+            TypeFlags::T_N2
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x11,
+            None,
+        )
+    }
+
+    /// `vpabsq xmm/ymm/zmm, xmm/ymm/zmm/m`.
+    pub fn vpabsq(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            dst,
+            src,
+            TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_EW1
+                | TypeFlags::T_B64
+                | TypeFlags::T_YMM,
+            0x1F,
+            None,
+        )
+    }
+
+    fn vmovrs(&mut self, dst: Reg, addr: Address, type_: TypeFlags) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Mem(addr),
+            type_ | TypeFlags::T_MAP5 | TypeFlags::T_MUST_EVEX,
+            0x6F,
+            None,
+        )
+    }
+
+    pub fn vmovrsb(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F2 | TypeFlags::T_W0)
+    }
+
+    pub fn vmovrsd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F3 | TypeFlags::T_W0)
+    }
+
+    pub fn vmovrsq(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F3 | TypeFlags::T_EW1)
+    }
+
+    pub fn vmovrsw(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F2 | TypeFlags::T_EW1)
     }
 
     // ─── SSE Instructions ───────────────────────────────────────

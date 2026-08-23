@@ -409,12 +409,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 811
+  rxbyak handwritten public instruction methods: 836
   rxbyak generated/macro unique methods:         1162
-  Xbyak names matched after Rust API mapping:    1771
-  Xbyak names not matched:                        108
+  Xbyak names matched after Rust API mapping:    1790
+  Xbyak names not matched:                         89
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    108
+    missing encoder/API names:                     89
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -715,3 +715,21 @@ select APX, and classic addresses use VEX with implicit TMM0. Existing AMX dot
 helpers now also restore the operand-class restriction supplied by Xbyak's
 Tmm signatures. Tests cover low/APX addresses, missing-index rejection, all
 new prefix/map/opcode combinations, both row directions and invalid classes.
+
+The vector move/blend slice ports VBLENDVPD/VBLENDVPS/VPBLENDVB, VLDMXCSR,
+VSTMXCSR, VMASKMOVDQU, both load/store forms of VMASKMOVPD/VMASKMOVPS,
+VMOVHLPS/VMOVLHPS, VMOVNTDQA, VCOMPRESSPD/VCOMPRESSPS, all three VMOVSH forms,
+VPABSQ and the four VMOVRS vector loads. Rust suffixes the memory-destination
+mask moves with `_store`, the two-operand default VMOVHLPS/VMOVLHPS forms with
+`_2`, and VMOVSH's memory overloads with `_load`/`_store`.
+
+This slice first restored the memory-operand state inherited from `Operand` by
+Xbyak's `Address`: rxbyak `Address` now preserves opmask and zero modifiers,
+selects EVEX when a memory mask is present, rejects memory masks unless the
+instruction carries `T_M_K`, rejects zeroing on a masked memory destination,
+and forwards the address mask into EVEX. This prerequisite is independently
+covered through the pre-existing VPMOVSSDB encoder. Exact-byte regressions for
+every newly exposed form were generated with Xbyak v7.40 and cover XMM, YMM,
+ZMM, extended registers, complex addresses, masked register destinations and
+masked memory destinations. No binary-layout-bearing type crosses an external
+ABI in this slice.
