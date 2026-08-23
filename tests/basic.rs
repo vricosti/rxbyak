@@ -14,6 +14,64 @@ fn test_nop() {
 }
 
 #[test]
+fn test_xbyak_multi_byte_nops() {
+    const EXPECTED: [&[u8]; 15] = [
+        &[0x90],
+        &[0x66, 0x90],
+        &[0x0F, 0x1F, 0x00],
+        &[0x0F, 0x1F, 0x40, 0x00],
+        &[0x0F, 0x1F, 0x44, 0x00, 0x00],
+        &[0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00],
+        &[0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00],
+        &[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+        &[0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+        &[0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+        &[
+            0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+        ],
+    ];
+
+    for (size, expected) in (1..=15).zip(EXPECTED) {
+        assert_eq!(assemble(|a| a.nop_bytes(size, 2)), expected);
+    }
+    assert_eq!(
+        assemble(|a| a.nop_bytes(10, 1)),
+        [EXPECTED[8], EXPECTED[0]].concat()
+    );
+    assert_eq!(assemble(|a| a.nop_bytes(4, 0)), [0x90; 4]);
+}
+
+#[test]
+fn test_align_uses_xbyak_multi_byte_nop() {
+    let code = assemble(|a| {
+        a.db(0xCC)?;
+        a.align(16)
+    });
+    assert_eq!(code[0], 0xCC);
+    assert_eq!(&code[1..], assemble(|a| a.nop_bytes(15, 2)));
+}
+
+#[test]
+fn test_align_rejects_non_power_of_two_like_xbyak() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(asm.align(0), Err(Error::BadAlign));
+    assert_eq!(asm.align(3), Err(Error::BadAlign));
+}
+
+#[test]
 fn test_ret() {
     let code = assemble(|a| a.ret());
     assert_eq!(code, [0xC3]);
@@ -47,6 +105,49 @@ fn test_push_pop_r8() {
         a.pop(R8)
     });
     assert_eq!(code, [0x41, 0x50, 0x41, 0x58]);
+}
+
+#[test]
+fn test_pushp_popp_rex2_ppx_hint() {
+    let code = assemble(|a| {
+        a.pushp(RAX)?;
+        a.popp(R8)?;
+        a.pushp(R16)?;
+        a.popp(R31)
+    });
+    assert_eq!(
+        code,
+        [0xD5, 0x08, 0x50, 0xD5, 0x09, 0x58, 0xD5, 0x18, 0x50, 0xD5, 0x19, 0x5F,]
+    );
+}
+
+#[test]
+fn test_pushp_rejects_non_64_bit_gpr() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(asm.pushp(EAX), Err(Error::BadCombination));
+    assert_eq!(asm.popp(XMM0), Err(Error::BadCombination));
+}
+
+#[test]
+fn test_xbyak_prefetch_family() {
+    let code = assemble(|a| {
+        let addr = byte_ptr(RAX.into());
+        a.prefetchnta(addr)?;
+        a.prefetcht0(addr)?;
+        a.prefetcht1(addr)?;
+        a.prefetcht2(addr)?;
+        a.prefetchrst2(addr)?;
+        a.prefetchit1(addr)?;
+        a.prefetchit0(addr)?;
+        a.prefetchw(addr)
+    });
+    assert_eq!(
+        code,
+        [
+            0x0F, 0x18, 0x00, 0x0F, 0x18, 0x08, 0x0F, 0x18, 0x10, 0x0F, 0x18, 0x18, 0x0F, 0x18,
+            0x20, 0x0F, 0x18, 0x30, 0x0F, 0x18, 0x38, 0x0F, 0x0D, 0x08,
+        ]
+    );
 }
 
 #[test]

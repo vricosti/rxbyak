@@ -145,14 +145,29 @@ impl CodeAssembler {
         self.buf.dq(v)
     }
 
-    /// Align the code to a boundary by emitting NOP bytes (0x90).
+    /// Align the code to a boundary using Xbyak's preferred multi-byte NOPs.
     #[inline]
     pub fn align(&mut self, n: usize) -> Result<()> {
+        self.align_with_nop_mode(n, 2)
+    }
+
+    /// Align the code to a boundary using Xbyak's `useMultiByteNop` mode.
+    ///
+    /// `0` emits only `0x90`, `1` uses the recommended sequences up to nine
+    /// bytes, and `2` also uses the AMD Zen 4 sequences up to fifteen bytes.
+    #[inline]
+    pub fn align_with_nop_mode(&mut self, n: usize, use_multi_byte_nop: u8) -> Result<()> {
         if n == 0 || (n & (n - 1)) != 0 {
-            return Err(Error::BadParameter);
+            return Err(Error::BadAlign);
         }
-        while !self.buf.size().is_multiple_of(n) {
-            self.buf.db(0x90)?;
+        if self.buf.alloc_mode() == AllocMode::AutoGrow
+            && !crate::platform::page_size().is_multiple_of(n)
+        {
+            return Err(Error::BadAlign);
+        }
+        let remain = self.buf.cur() as usize % n;
+        if remain != 0 {
+            self.nop_bytes(n - remain, use_multi_byte_nop)?;
         }
         Ok(())
     }
@@ -279,10 +294,63 @@ impl CodeAssembler {
 
     // ─── x86 Instructions (manually implemented) ───────────────
 
-    /// `nop` — No operation.
+    /// `nop` — Emit Xbyak's default one-byte no-op.
     #[inline]
     pub fn nop(&mut self) -> Result<()> {
-        self.buf.db(0x90)
+        self.nop_bytes(1, 2)
+    }
+
+    /// Emit `size` bytes using Xbyak's multi-byte NOP table.
+    ///
+    /// This is the Rust counterpart of Xbyak's overloaded
+    /// `nop(size, useMultiByteNop)` method.
+    pub fn nop_bytes(&mut self, mut size: usize, use_multi_byte_nop: u8) -> Result<()> {
+        const NOP_TABLE: [&[u8]; 15] = [
+            &[0x90],
+            &[0x66, 0x90],
+            &[0x0F, 0x1F, 0x00],
+            &[0x0F, 0x1F, 0x40, 0x00],
+            &[0x0F, 0x1F, 0x44, 0x00, 0x00],
+            &[0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00],
+            &[0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00],
+            &[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            &[0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            &[0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            &[
+                0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+            ],
+        ];
+
+        if use_multi_byte_nop == 0 {
+            while size != 0 {
+                self.buf.db(0x90)?;
+                size -= 1;
+            }
+            return Ok(());
+        }
+
+        let sequence_count = if use_multi_byte_nop == 2 { 15 } else { 9 };
+        while size != 0 {
+            let len = sequence_count.min(size);
+            for &byte in NOP_TABLE[len - 1] {
+                self.buf.db(byte)?;
+            }
+            size -= len;
+        }
+        Ok(())
     }
 
     /// `ret` — Return from procedure.
@@ -366,6 +434,34 @@ impl CodeAssembler {
                 Err(Error::BadCombination)
             }
         }
+    }
+
+    /// `pushp r64` — APX push with the PPX hint.
+    #[inline]
+    pub fn pushp(&mut self, reg: Reg) -> Result<()> {
+        self.push_pop_p(reg, 0x50)
+    }
+
+    /// `popp r64` — APX pop with the PPX hint.
+    #[inline]
+    pub fn popp(&mut self, reg: Reg) -> Result<()> {
+        self.push_pop_p(reg, 0x58)
+    }
+
+    /// Xbyak `opPushPopP`: REX2 is mandatory because it carries W=1 PPX.
+    fn push_pop_p(&mut self, reg: Reg, opcode: u8) -> Result<()> {
+        if !reg.is_reg_bit(64) {
+            return Err(Error::BadCombination);
+        }
+        let none = Reg::default();
+        self.buf.emit_rex2(
+            false,
+            crate::encode::rex_rxb(3, true, &none, &reg, &none),
+            &none,
+            &reg,
+            &none,
+        )?;
+        self.buf.db(opcode | (reg.get_idx() & 7))
     }
 
     /// `mov dst, src` — Move data.
@@ -4098,25 +4194,89 @@ impl CodeAssembler {
     #[inline]
     pub fn prefetchnta(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(0, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
     }
     /// `prefetcht0 [m]` — 0F 18 /1
     #[inline]
     pub fn prefetcht0(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(1, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
     }
     /// `prefetcht1 [m]` — 0F 18 /2
     #[inline]
     pub fn prefetcht1(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(2, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
     }
     /// `prefetcht2 [m]` — 0F 18 /3
     #[inline]
     pub fn prefetcht2(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(3, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchrst2 [m]` — 0F 18 /4
+    #[inline]
+    pub fn prefetchrst2(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(4, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchit1 [m]` — 0F 18 /6
+    #[inline]
+    pub fn prefetchit1(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(6, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchit0 [m]` — 0F 18 /7
+    #[inline]
+    pub fn prefetchit0(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(7, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchw [m]` — 0F 0D /1
+    #[inline]
+    pub fn prefetchw(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(1, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x0D,
+        )
     }
     /// `clflush [m]` — 0F AE /7
     #[inline]

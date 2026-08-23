@@ -860,38 +860,6 @@ pub static AVX512_X_X_XM: &[Insn] = &[
         T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16,
         0x1B,
     ),
-    // v4fmadd/fnmadd (AVX-512_4FMAPS)
-    Insn::avx(
-        "v4fmaddps",
-        T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16,
-        0x9A,
-    ),
-    Insn::avx(
-        "v4fmaddss",
-        T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16,
-        0x9B,
-    ),
-    Insn::avx(
-        "v4fnmaddps",
-        T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16,
-        0xAA,
-    ),
-    Insn::avx(
-        "v4fnmaddss",
-        T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16,
-        0xAB,
-    ),
-    // v4dpwssd/v4dpwssds (AVX-512_4VNNIW)
-    Insn::avx(
-        "vp4dpwssd",
-        T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16,
-        0x52,
-    ),
-    Insn::avx(
-        "vp4dpwssds",
-        T_F2 | T_0F38 | T_MUST_EVEX | T_W0 | T_N16,
-        0x53,
-    ),
     // vp2intersect
     Insn::avx_k(
         "vp2intersectd",

@@ -137,8 +137,10 @@ pause
 pop
 popcnt
 popf
+popp
 push
 push_imm
+pushp
 rcl
 rcl_cl
 rcr
@@ -547,9 +549,13 @@ pmullw
 pmuludq
 por
 prefetchnta
+prefetchit0
+prefetchit1
+prefetchrst2
 prefetcht0
 prefetcht1
 prefetcht2
+prefetchw
 psadbw
 pshufb
 pshufd
@@ -1030,12 +1036,6 @@ vmovdqu64
 vmovdqu8
 vp2intersectd
 vp2intersectq
-vp4dpwssd
-vp4dpwssds
-v4fmaddps
-v4fmaddss
-v4fnmaddps
-v4fnmaddss
 vpabsq
 vpandd
 vpandnd
