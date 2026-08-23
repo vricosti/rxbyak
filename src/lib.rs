@@ -27,4 +27,7 @@ pub use address::{byte_ptr, dword_ptr, ptr, qword_ptr, word_ptr};
 pub use reg::*;
 
 // Re-export StackFrame utilities
-pub use util::stack_frame::{StackFrame, USE_RCX, USE_RDX};
+pub use util::stack_frame::{
+    use_avx, use_sse, StackFrame, NO_VZEROUPPER, USE_PPX, USE_PUSH2, USE_R30_R31, USE_RBP,
+    USE_RBP_AS_FRAME_POINTER, USE_RCX, USE_RDI, USE_RDX, USE_RSI,
+};
