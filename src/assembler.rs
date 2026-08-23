@@ -6161,6 +6161,38 @@ impl CodeAssembler {
         self.buf.emit_addr(addr, r.get_idx())
     }
 
+    /// Xbyak `opFpuMem`: select the escape byte from the declared memory size.
+    #[allow(clippy::too_many_arguments)]
+    fn fpu_mem_by_size(
+        &mut self,
+        addr: &Address,
+        m16: u8,
+        m32: u8,
+        m64: u8,
+        mut ext: u8,
+        m64_ext: u8,
+    ) -> Result<()> {
+        if addr.is_64bit_disp() {
+            return Err(Error::CantUse64BitDisp);
+        }
+        let code = match addr.get_bit() {
+            16 => m16,
+            32 => m32,
+            64 => m64,
+            _ => 0,
+        };
+        if code == 0 {
+            return Err(Error::BadMemSize);
+        }
+        if m64_ext != 0 && addr.get_bit() == 64 {
+            ext = m64_ext;
+        }
+        self.buf
+            .emit_rex_for_reg_mem(&Reg::fpu(0), addr, TypeFlags::NONE)?;
+        self.buf.db(code)?;
+        self.buf.emit_addr(addr, ext)
+    }
+
     // ── FLD / FST / FSTP ──────────────────────────────────────
     /// `fld st(i)` — D9 C0+i
     #[inline]
@@ -6489,6 +6521,12 @@ impl CodeAssembler {
         self.buf.db(0xD9)?;
         self.buf.db(0xFE)
     }
+    /// `fsincos` — D9 FB
+    #[inline]
+    pub fn fsincos(&mut self) -> Result<()> {
+        self.buf.db(0xD9)?;
+        self.buf.db(0xFB)
+    }
     /// `fcos` — D9 FF
     #[inline]
     pub fn fcos(&mut self) -> Result<()> {
@@ -6676,6 +6714,89 @@ impl CodeAssembler {
         self.buf.db(0xDF)?;
         self.buf.db(0xE0)
     }
+    /// `fstsw m16` — 9B DD /7
+    #[inline]
+    pub fn fstsw(&mut self, addr: Address) -> Result<()> {
+        self.buf.db(0x9B)?;
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(7), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDD)
+    }
+    /// Xbyak's register overload accepts AX and rejects every other Reg16.
+    #[inline]
+    pub fn fstsw_reg(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(16) || reg.get_idx() != 0 {
+            return Err(Error::BadParameter);
+        }
+        self.fstsw_ax()
+    }
+    /// `fbld m80bcd` — DF /4
+    #[inline]
+    pub fn fbld(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(4), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDF)
+    }
+    /// `fbstp m80bcd` — DF /6
+    #[inline]
+    pub fn fbstp(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(6), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDF)
+    }
+    /// `fldenv [mem]` — D9 /4
+    #[inline]
+    pub fn fldenv(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(4), TypeFlags::T_ALLOW_DIFF_SIZE, 0xD9)
+    }
+    /// `fnsave [mem]` — DD /6
+    #[inline]
+    pub fn fnsave(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(6), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDD)
+    }
+    /// `fnstenv [mem]` — D9 /6
+    #[inline]
+    pub fn fnstenv(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(6), TypeFlags::T_ALLOW_DIFF_SIZE, 0xD9)
+    }
+    /// `frstor [mem]` — DD /4
+    #[inline]
+    pub fn frstor(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(4), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDD)
+    }
+    /// `fsave [mem]` — WAIT + DD /6
+    #[inline]
+    pub fn fsave(&mut self, addr: Address) -> Result<()> {
+        self.buf.db(0x9B)?;
+        self.fnsave(addr)
+    }
+    /// `fstenv [mem]` — WAIT + D9 /6
+    #[inline]
+    pub fn fstenv(&mut self, addr: Address) -> Result<()> {
+        self.buf.db(0x9B)?;
+        self.fnstenv(addr)
+    }
+    /// `fxrstor [mem]` — 0F AE /1
+    #[inline]
+    pub fn fxrstor(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr32(1),
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    /// `fxrstor64 [mem]` — REX.W + 0F AE /1
+    #[inline]
+    pub fn fxrstor64(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr64(1),
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
     /// `fclex` — 9B DB E2
     #[inline]
     pub fn fclex(&mut self) -> Result<()> {
@@ -6753,6 +6874,16 @@ impl CodeAssembler {
     #[inline]
     pub fn fidiv_m32(&mut self, addr: Address) -> Result<()> {
         self.fpu_mem(0xDA, 6, &addr)
+    }
+    /// `fidivr m16int/m32int` — DE/DA /7
+    #[inline]
+    pub fn fidivr(&mut self, addr: Address) -> Result<()> {
+        self.fpu_mem_by_size(&addr, 0xDE, 0xDA, 0, 7, 0)
+    }
+    /// `fisubr m16int/m32int` — DE/DA /5
+    #[inline]
+    pub fn fisubr(&mut self, addr: Address) -> Result<()> {
+        self.fpu_mem_by_size(&addr, 0xDE, 0xDA, 0, 5, 0)
     }
     /// `ficom m16int` — DE /2
     #[inline]
