@@ -497,3 +497,16 @@ storage; no CpuMask bytes cross an ABI or serialization boundary. Rust Result
 reports the same invalid-index conditions that Xbyak reports by boolean return
 or exception. The platform-specific CpuTopology population remains the next
 slice.
+
+CpuTopology's common API and Linux population now follow Xbyak v7.40. The
+constructor derives hybrid state from Cpu and returns CantInitCpuTopology on
+failure; LogicalCpu/CpuCache expose the upstream sibling, cache and diagnostic
+helpers. Linux uses `_SC_NPROCESSORS_ONLN`, scans the same four cache indices,
+assigns the same sysfs fields, and restores the original affinity after the
+CPUID 0x1a hybrid-core fallback. A native differential probe compared the
+top-level counts/line size/hybrid flag and every logical CPU's core ID, core
+type, four cache size/associativity pairs and sharing masks; every value
+matched Xbyak v7.40 on the audit host. macOS remains intentionally unsupported
+because upstream also returns initialization failure there. The Windows
+GetLogicalProcessorInformationEx implementation is still a missing platform
+slice.

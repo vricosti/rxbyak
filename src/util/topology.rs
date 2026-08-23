@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 
 use crate::error::{Error, Result};
+use crate::util::cpu::{Cpu, HYBRID};
 
 const CPU_MASK_LIMIT: u32 = 1 << 10;
 
@@ -144,6 +145,17 @@ pub enum CoreType {
     Standard,    // Non-hybrid
 }
 
+impl CoreType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Performance => "P-core",
+            Self::Efficient => "E-core",
+            Self::Standard => "Standard",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
 /// Cache type identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CacheType {
@@ -162,6 +174,15 @@ impl CacheType {
             CacheType::L1d => 1,
             CacheType::L2 => 2,
             CacheType::L3 => 3,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::L1i => "L1i",
+            Self::L1d => "L1d",
+            Self::L2 => "L2",
+            Self::L3 => "L3",
         }
     }
 }
@@ -187,6 +208,18 @@ impl CpuCache {
     pub fn shared_cpu_count(&self) -> usize {
         self.shared_cpu_indices.len()
     }
+
+    pub fn put(&self, label: Option<&str>) {
+        if let Some(label) = label {
+            print!("{label}: ");
+        }
+        print!(
+            "{} KiB, assoc. {}, shared ",
+            self.size / 1024,
+            self.associativity
+        );
+        self.shared_cpu_indices.put(None);
+    }
 }
 
 /// Information about a single logical CPU.
@@ -201,10 +234,10 @@ pub struct LogicalCpu {
 }
 
 impl LogicalCpu {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             core_id: 0,
-            core_type: CoreType::Standard,
+            core_type: CoreType::Unknown,
             caches: Default::default(),
         }
     }
@@ -212,6 +245,26 @@ impl LogicalCpu {
     /// Get cache information for a specific cache type.
     pub fn cache(&self, ct: CacheType) -> &CpuCache {
         &self.caches[ct.index()]
+    }
+
+    pub fn siblings(&self) -> &CpuMask {
+        &self.caches[CacheType::L1i.index()].shared_cpu_indices
+    }
+
+    pub fn put(&self, label: Option<&str>) {
+        if let Some(label) = label {
+            print!("{label}: ");
+        }
+        println!("coreId {}, type {}", self.core_id, self.core_type.as_str());
+        for cache_type in CacheType::ALL {
+            self.cache(cache_type).put(Some(cache_type.as_str()));
+        }
+    }
+}
+
+impl Default for LogicalCpu {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -224,18 +277,17 @@ pub struct CpuTopology {
 }
 
 impl CpuTopology {
-    /// Detect CPU topology. Returns `None` if detection fails.
-    pub fn detect(is_hybrid: bool) -> Option<Self> {
+    pub fn new(cpu: &Cpu) -> Result<Self> {
         let mut topo = CpuTopology {
             logical_cpus: Vec::new(),
             physical_core_num: 0,
             line_size: 0,
-            is_hybrid,
+            is_hybrid: cpu.has(HYBRID),
         };
         if init_topology(&mut topo) {
-            Some(topo)
+            Ok(topo)
         } else {
-            None
+            Err(Error::CantInitCpuTopology)
         }
     }
 
@@ -276,25 +328,11 @@ impl CpuTopology {
 fn init_topology(topo: &mut CpuTopology) -> bool {
     use std::fs;
 
-    // Get number of online CPUs
-    let logical_cpu_num = match fs::read_to_string("/sys/devices/system/cpu/online") {
-        Ok(s) => count_from_cpu_list(s.trim()),
-        Err(_) => {
-            // Fallback to sysconf
-            #[cfg(unix)]
-            unsafe {
-                libc::sysconf(libc::_SC_NPROCESSORS_ONLN) as u32
-            }
-            #[cfg(not(unix))]
-            {
-                return false;
-            }
-        }
-    };
-
-    if logical_cpu_num == 0 {
+    let logical_cpu_num = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+    if logical_cpu_num <= 0 || logical_cpu_num as u64 >= u64::from(CPU_MASK_LIMIT) {
         return false;
     }
+    let logical_cpu_num = logical_cpu_num as u32;
 
     topo.logical_cpus
         .resize_with(logical_cpu_num as usize, LogicalCpu::new);
@@ -306,26 +344,30 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
         // Read core ID
         let core_id = read_int_from_file(&format!("{}/topology/core_id", base));
         topo.logical_cpus[cpu_idx as usize].core_id = core_id;
+        topo.logical_cpus[cpu_idx as usize].core_type = CoreType::Standard;
         max_physical_idx = max_physical_idx.max(core_id);
 
         // Read cache hierarchy
-        for cache_idx in 0..8u32 {
+        for cache_idx in 0..CacheType::ALL.len() as u32 {
             let cache_base = format!("{}/cache/index{}", base, cache_idx);
 
             // Determine cache type
             let cache_type = match fs::read_to_string(format!("{}/type", cache_base)) {
                 Ok(s) => {
                     let s = s.trim();
-                    let level = read_int_from_file(&format!("{}/level", cache_base));
-                    match (s, level) {
-                        ("Instruction", 1) => Some(CacheType::L1i),
-                        ("Data", 1) => Some(CacheType::L1d),
-                        ("Data", 2) | ("Unified", 2) => Some(CacheType::L2),
-                        ("Data", 3) | ("Unified", 3) => Some(CacheType::L3),
-                        _ => None,
+                    if s.starts_with("Instruction") {
+                        Some(CacheType::L1i)
+                    } else {
+                        let level = read_int_from_file(&format!("{}/level", cache_base));
+                        match (s, level) {
+                            ("Data", 1) => Some(CacheType::L1d),
+                            ("Data", 2) | ("Unified", 2) => Some(CacheType::L2),
+                            ("Data", 3) | ("Unified", 3) => Some(CacheType::L3),
+                            _ => None,
+                        }
                     }
                 }
-                Err(_) => break, // No more cache indices
+                Err(_) => continue,
             };
 
             let ct = match cache_type {
@@ -353,21 +395,27 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
         }
     }
 
-    // Hybrid core types
+    // Assign core types for hybrid architectures.
     if topo.is_hybrid {
-        if let Ok(s) = fs::read_to_string("/sys/devices/cpu_core/cpus") {
-            for idx in parse_cpu_list(s.trim()).unwrap_or_default().iter() {
+        let p_cores = read_cpu_mask_from_file("/sys/devices/cpu_core/cpus");
+        if let Some(mask) = &p_cores {
+            for idx in mask {
                 if (idx as usize) < topo.logical_cpus.len() {
                     topo.logical_cpus[idx as usize].core_type = CoreType::Performance;
                 }
             }
         }
-        if let Ok(s) = fs::read_to_string("/sys/devices/cpu_atom/cpus") {
-            for idx in parse_cpu_list(s.trim()).unwrap_or_default().iter() {
+        let e_cores = read_cpu_mask_from_file("/sys/devices/cpu_atom/cpus");
+        if let Some(mask) = &e_cores {
+            for idx in mask {
                 if (idx as usize) < topo.logical_cpus.len() {
                     topo.logical_cpus[idx as usize].core_type = CoreType::Efficient;
                 }
             }
+        }
+
+        if p_cores.is_none() || e_cores.is_none() {
+            update_core_types_with_affinity(topo);
         }
     }
 
@@ -377,6 +425,63 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
 
     topo.physical_core_num = (max_physical_idx + 1) as usize;
     true
+}
+
+pub fn get_core_type() -> CoreType {
+    let eax = Cpu::get_cpuid_ex(0x1a, 0)[0];
+    match (eax >> 24) & 0xff {
+        0x40 => CoreType::Performance,
+        0x20 => CoreType::Efficient,
+        _ => CoreType::Standard,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_cpu_mask_from_file(path: &str) -> Option<CpuMask> {
+    let value = std::fs::read_to_string(path).ok()?;
+    parse_cpu_list(value.trim()).ok()
+}
+
+#[cfg(target_os = "linux")]
+fn set_affinity_and_get_core_type(cpu: u32) -> CoreType {
+    unsafe {
+        let mut mask: libc::cpu_set_t = std::mem::zeroed();
+        libc::CPU_ZERO(&mut mask);
+        libc::CPU_SET(cpu as usize, &mut mask);
+        if libc::sched_setaffinity(
+            0,
+            std::mem::size_of::<libc::cpu_set_t>(),
+            &mask as *const libc::cpu_set_t,
+        ) != 0
+        {
+            return CoreType::Standard;
+        }
+    }
+    get_core_type()
+}
+
+#[cfg(target_os = "linux")]
+fn update_core_types_with_affinity(topo: &mut CpuTopology) {
+    unsafe {
+        let mut original: libc::cpu_set_t = std::mem::zeroed();
+        libc::CPU_ZERO(&mut original);
+        if libc::sched_getaffinity(
+            0,
+            std::mem::size_of::<libc::cpu_set_t>(),
+            &mut original as *mut libc::cpu_set_t,
+        ) != 0
+        {
+            return;
+        }
+        for (index, cpu) in topo.logical_cpus.iter_mut().enumerate() {
+            cpu.core_type = set_affinity_and_get_core_type(index as u32);
+        }
+        let _ = libc::sched_setaffinity(
+            0,
+            std::mem::size_of::<libc::cpu_set_t>(),
+            &original as *const libc::cpu_set_t,
+        );
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -395,6 +500,7 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
 
 // --- Helper functions ---
 
+#[cfg(target_os = "linux")]
 fn read_int_from_file(path: &str) -> u32 {
     std::fs::read_to_string(path)
         .ok()
@@ -403,6 +509,7 @@ fn read_int_from_file(path: &str) -> u32 {
 }
 
 /// Parse a size string like "32K", "1M", "512" into bytes.
+#[cfg(any(target_os = "linux", test))]
 fn parse_size(s: &str) -> u32 {
     let s = s.trim();
     if s.is_empty() {
@@ -419,15 +526,11 @@ fn parse_size(s: &str) -> u32 {
 }
 
 /// Parse a CPU list string like "0-3,5,7,10-12" into a set of indices.
+#[cfg(any(target_os = "linux", test))]
 fn parse_cpu_list(s: &str) -> Result<CpuMask> {
     let mut mask = CpuMask::new();
     mask.set_str(s)?;
     Ok(mask)
-}
-
-/// Count total CPUs from an "online" cpu list string (e.g., "0-7" → 8).
-fn count_from_cpu_list(s: &str) -> u32 {
-    parse_cpu_list(s).map_or(0, |mask| mask.len() as u32)
 }
 
 #[cfg(test)]
@@ -494,16 +597,23 @@ mod tests {
     }
 
     #[test]
-    fn test_count_from_cpu_list() {
-        assert_eq!(count_from_cpu_list("0-7"), 8);
-        assert_eq!(count_from_cpu_list("0-3,8-11"), 8);
-    }
-
-    #[test]
     fn test_cache_type_index() {
         assert_eq!(CacheType::L1i.index(), 0);
         assert_eq!(CacheType::L1d.index(), 1);
         assert_eq!(CacheType::L2.index(), 2);
         assert_eq!(CacheType::L3.index(), 3);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_linux_topology_contract() {
+        let topology = CpuTopology::new(&Cpu::new()).unwrap();
+        assert!(topology.logical_cpu_count() > 0);
+        assert!(topology.logical_cpu_count() < CPU_MASK_LIMIT as usize);
+        assert!(topology.physical_core_count() > 0);
+        assert!(matches!(
+            get_core_type(),
+            CoreType::Performance | CoreType::Efficient | CoreType::Standard
+        ));
     }
 }
