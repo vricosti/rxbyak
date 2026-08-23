@@ -88,6 +88,9 @@ method names with suffixes:
   adcx(d, reg, op)              adcx3(d, reg, op)
   adox(d, reg, op)              adox3(d, reg, op)
   bndmov(mem, bnd)              bndmov_store(mem, bnd)
+  ccmpcc(op, imm, dfv)          ccmpcc_imm(op, imm, dfv)
+  ctestcc(op, imm, dfv)         ctestcc_imm(op, imm, dfv)
+  cfcmovcc(d, reg, op)          cfcmovcc3(d, reg, op)
   shld(op, reg, imm)            shld(op, reg, imm)
   shld(op, reg, cl)             shld_cl(op, reg)
   pslld(xmm, xmm)              pslld(xmm, xmm)          [SSE register form]
@@ -399,11 +402,11 @@ optional omitted-operand overloads disabled) and reports:
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
   rxbyak handwritten public instruction methods: 791
-  rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1669
-  Xbyak names not matched:                        210
+  rxbyak generated/macro unique methods:         1162
+  Xbyak names matched after Rust API mapping:    1757
+  Xbyak names not matched:                        122
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    210
+    missing encoder/API names:                    122
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -673,3 +676,19 @@ MPX register checks also use the `disableRex` branch of xbyak.h `opRext`:
 32/64-bit and extended registers, sized and unsized memory, BND-register
 moves, optimized versus non-optimized `[rax*2]`, and RIP rejection. No
 binary-layout-bearing type changes in this slice.
+
+The APX conditional slice ports xbyak.h `opCcmp`, `opCcmpi`, `opTesti` and
+`opCfcmov`, plus the 16 CMPccXADD wrappers that use `opRRO`. All 28 CCMP and
+28 CTEST spellings, all 16 CFCMOV conditions, and all 16 CMPccXADD conditions
+are present. Source macros mirror Xbyak's generated one-line wrappers and keep
+every spelling-to-selector/opcode mapping visible in assembler.rs; the audit
+tool inventories those expansions as generated public methods.
+
+Rust names immediate CCMP/CTEST overloads with `_imm` and three-operand
+CFCMOV overloads with `3`; `dfv` remains a signed explicit argument so invalid
+values still produce InvalidDfv rather than being excluded by the type system.
+Immediate width selection, unsized-memory rejection, operand bitwise-width
+selection, memory swapping, implicit NF placement, and validation order follow
+the upstream helpers literally. Differential tests cover full register,
+memory and immediate bytes, every selector/opcode table entry, invalid DFV,
+unsized memory, 8-bit rejection and width mismatch.

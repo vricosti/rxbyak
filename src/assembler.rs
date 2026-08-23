@@ -12,6 +12,101 @@ pub struct CodeAssembler {
     label_mgr: LabelManager,
 }
 
+macro_rules! define_ccmp_methods {
+    ($( $name:ident, $imm_name:ident => $sc:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(
+                &mut self,
+                op1: impl Into<RegMem>,
+                op2: impl Into<RegMem>,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_ccmp(op1.into(), op2.into(), dfv, 0x38, $sc)
+            }
+
+            #[inline]
+            pub fn $imm_name(
+                &mut self,
+                op: impl Into<RegMem>,
+                imm: i32,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_ccmpi(op.into(), imm, dfv, $sc)
+            }
+        )*
+    };
+}
+
+macro_rules! define_ctest_methods {
+    ($( $name:ident, $imm_name:ident => $sc:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(
+                &mut self,
+                op: impl Into<RegMem>,
+                reg: Reg,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_ccmp(op.into(), RegMem::Reg(reg), dfv, 0x84, $sc)
+            }
+
+            #[inline]
+            pub fn $imm_name(
+                &mut self,
+                op: impl Into<RegMem>,
+                imm: i32,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_testi(op.into(), imm, dfv, $sc)
+            }
+        )*
+    };
+}
+
+macro_rules! define_cfcmov_methods {
+    ($( $name:ident, $name3:ident => $opcode:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(
+                &mut self,
+                op1: impl Into<RegMem>,
+                op2: impl Into<RegMem>,
+            ) -> Result<()> {
+                self.op_cfcmov(Reg::default(), op1.into(), op2.into(), $opcode)
+            }
+
+            #[inline]
+            pub fn $name3(
+                &mut self,
+                dst: Reg,
+                reg: Reg,
+                op: impl Into<RegMem>,
+            ) -> Result<()> {
+                self.op_cfcmov(dst.nf(), op.into(), RegMem::Reg(reg), $opcode)
+            }
+        )*
+    };
+}
+
+macro_rules! define_cmpccxadd_methods {
+    ($( $name:ident => $opcode:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(&mut self, addr: Address, reg1: Reg, reg2: Reg) -> Result<()> {
+                self.bmi_op_rro(
+                    reg1,
+                    reg2,
+                    RegMem::Mem(addr),
+                    TypeFlags::T_APX | TypeFlags::T_66 | TypeFlags::T_0F38,
+                    $opcode,
+                    None,
+                )
+            }
+        )*
+    };
+}
+
 impl CodeAssembler {
     /// Create a new assembler with the given maximum code size.
     pub fn new(max_size: usize) -> Result<Self> {
@@ -988,6 +1083,230 @@ impl CodeAssembler {
     #[inline]
     pub fn adox3(&mut self, dst: Reg, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
         self.adcx_adox3(dst, reg, op.into(), TypeFlags::T_F3)
+    }
+
+    fn validate_dfv(dfv: i32) -> Result<u8> {
+        if !(0..=15).contains(&dfv) {
+            return Err(Error::InvalidDfv);
+        }
+        Ok(dfv as u8)
+    }
+
+    fn conditional_imm_bit(op: &RegMem, imm: i32) -> Result<u8> {
+        let op_bit = op.get_bit();
+        if op_bit == 0 {
+            return Err(Error::MemSizeIsNotSpecified);
+        }
+        let value = imm as u32;
+        let mut imm_bit = if (-128..=127).contains(&imm) {
+            8
+        } else {
+            let high = value & 0xFFFF_0000;
+            if high == 0 || high == 0xFFFF_0000 {
+                16
+            } else {
+                32
+            }
+        };
+        if op_bit == 8 {
+            imm_bit = 8;
+        }
+        if op_bit < imm_bit {
+            return Err(Error::ImmIsTooBig);
+        }
+        if (op_bit == 32 || op_bit == 64) && imm_bit == 16 {
+            imm_bit = 32;
+        }
+        Ok(imm_bit as u8)
+    }
+
+    fn op_ccmp(&mut self, op1: RegMem, op2: RegMem, dfv: i32, opcode: u8, sc: u8) -> Result<()> {
+        let dfv = Self::validate_dfv(dfv)?;
+        let bit = op1.get_bit() | op2.get_bit();
+        let default_flags = Reg::new(15 - dfv, crate::operand::Kind::Reg, bit);
+        self.buf.op_roo(
+            &default_flags,
+            &op1,
+            &op2,
+            TypeFlags::T_APX | TypeFlags::T_CODE1_IF1,
+            opcode,
+            0,
+            Some(sc),
+        )?;
+        Ok(())
+    }
+
+    fn op_ccmpi(&mut self, op: RegMem, imm: i32, dfv: i32, sc: u8) -> Result<()> {
+        let dfv = Self::validate_dfv(dfv)?;
+        let imm_bit = Self::conditional_imm_bit(&op, imm)?;
+        let op_bit = op.get_bit();
+        let opcode = 0x80 | u8::from((imm_bit as u16) < op_bit.min(32)) * 2;
+        self.buf.op_roo(
+            &Reg::new(15 - dfv, crate::operand::Kind::Reg, op_bit),
+            &op,
+            &RegMem::Reg(Reg::new(15, crate::operand::Kind::Reg, op_bit)),
+            TypeFlags::T_APX | TypeFlags::T_CODE1_IF1,
+            opcode,
+            imm_bit / 8,
+            Some(sc),
+        )?;
+        self.buf.db_n(imm as u32 as u64, (imm_bit / 8) as usize)
+    }
+
+    fn op_testi(&mut self, op: RegMem, imm: i32, dfv: i32, sc: u8) -> Result<()> {
+        let dfv = Self::validate_dfv(dfv)?;
+        let op_bit = op.get_bit();
+        if op_bit == 0 {
+            return Err(Error::MemSizeIsNotSpecified);
+        }
+        let imm_bit = op_bit.min(32) as u8;
+        self.buf.op_roo(
+            &Reg::new(15 - dfv, crate::operand::Kind::Reg, op_bit),
+            &op,
+            &RegMem::Reg(Reg::new(0, crate::operand::Kind::Reg, op_bit)),
+            TypeFlags::T_APX | TypeFlags::T_CODE1_IF1,
+            0xF6,
+            imm_bit / 8,
+            Some(sc),
+        )?;
+        self.buf.db_n(imm as u32 as u64, (imm_bit / 8) as usize)
+    }
+
+    fn op_cfcmov(&mut self, dst: Reg, op1: RegMem, op2: RegMem, opcode: u8) -> Result<()> {
+        let dst_bit = dst.get_bit();
+        let op2_bit = op2.get_bit();
+        if dst_bit > 0 && op2_bit > 0 && dst_bit != op2_bit {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if op1.get_bit() == 8 || op2_bit == 8 {
+            return Err(Error::BadSizeOfRegister);
+        }
+        match op2 {
+            RegMem::Mem(_) => {
+                if op1.is_mem() {
+                    return Err(Error::BadCombination);
+                }
+                let type_ = TypeFlags::T_MUST_EVEX
+                    | if dst_bit > 0 {
+                        TypeFlags::T_NF
+                    } else {
+                        TypeFlags::NONE
+                    };
+                self.buf.op_roo(&dst, &op2, &op1, type_, opcode, 0, None)?;
+            }
+            RegMem::Reg(reg) => {
+                self.buf.op_roo(
+                    &dst,
+                    &op1,
+                    &RegMem::Reg(reg.nf()),
+                    TypeFlags::T_MUST_EVEX | TypeFlags::T_NF,
+                    opcode,
+                    0,
+                    None,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    define_ccmp_methods! {
+        ccmpa, ccmpa_imm => 7;
+        ccmpae, ccmpae_imm => 3;
+        ccmpb, ccmpb_imm => 2;
+        ccmpbe, ccmpbe_imm => 6;
+        ccmpc, ccmpc_imm => 2;
+        ccmpe, ccmpe_imm => 4;
+        ccmpf, ccmpf_imm => 11;
+        ccmpg, ccmpg_imm => 15;
+        ccmpge, ccmpge_imm => 13;
+        ccmpl, ccmpl_imm => 12;
+        ccmple, ccmple_imm => 14;
+        ccmpna, ccmpna_imm => 6;
+        ccmpnae, ccmpnae_imm => 2;
+        ccmpnb, ccmpnb_imm => 3;
+        ccmpnbe, ccmpnbe_imm => 7;
+        ccmpnc, ccmpnc_imm => 3;
+        ccmpne, ccmpne_imm => 5;
+        ccmpng, ccmpng_imm => 14;
+        ccmpnge, ccmpnge_imm => 12;
+        ccmpnl, ccmpnl_imm => 13;
+        ccmpnle, ccmpnle_imm => 15;
+        ccmpno, ccmpno_imm => 1;
+        ccmpns, ccmpns_imm => 9;
+        ccmpnz, ccmpnz_imm => 5;
+        ccmpo, ccmpo_imm => 0;
+        ccmps, ccmps_imm => 8;
+        ccmpt, ccmpt_imm => 10;
+        ccmpz, ccmpz_imm => 4;
+    }
+
+    define_ctest_methods! {
+        ctesta, ctesta_imm => 7;
+        ctestae, ctestae_imm => 3;
+        ctestb, ctestb_imm => 2;
+        ctestbe, ctestbe_imm => 6;
+        ctestc, ctestc_imm => 2;
+        cteste, cteste_imm => 4;
+        ctestf, ctestf_imm => 11;
+        ctestg, ctestg_imm => 15;
+        ctestge, ctestge_imm => 13;
+        ctestl, ctestl_imm => 12;
+        ctestle, ctestle_imm => 14;
+        ctestna, ctestna_imm => 6;
+        ctestnae, ctestnae_imm => 2;
+        ctestnb, ctestnb_imm => 3;
+        ctestnbe, ctestnbe_imm => 7;
+        ctestnc, ctestnc_imm => 3;
+        ctestne, ctestne_imm => 5;
+        ctestng, ctestng_imm => 14;
+        ctestnge, ctestnge_imm => 12;
+        ctestnl, ctestnl_imm => 13;
+        ctestnle, ctestnle_imm => 15;
+        ctestno, ctestno_imm => 1;
+        ctestns, ctestns_imm => 9;
+        ctestnz, ctestnz_imm => 5;
+        ctesto, ctesto_imm => 0;
+        ctests, ctests_imm => 8;
+        ctestt, ctestt_imm => 10;
+        ctestz, ctestz_imm => 4;
+    }
+
+    define_cfcmov_methods! {
+        cfcmovo, cfcmovo3 => 0x40;
+        cfcmovno, cfcmovno3 => 0x41;
+        cfcmovb, cfcmovb3 => 0x42;
+        cfcmovnb, cfcmovnb3 => 0x43;
+        cfcmovz, cfcmovz3 => 0x44;
+        cfcmovnz, cfcmovnz3 => 0x45;
+        cfcmovbe, cfcmovbe3 => 0x46;
+        cfcmovnbe, cfcmovnbe3 => 0x47;
+        cfcmovs, cfcmovs3 => 0x48;
+        cfcmovns, cfcmovns3 => 0x49;
+        cfcmovp, cfcmovp3 => 0x4A;
+        cfcmovnp, cfcmovnp3 => 0x4B;
+        cfcmovl, cfcmovl3 => 0x4C;
+        cfcmovnl, cfcmovnl3 => 0x4D;
+        cfcmovle, cfcmovle3 => 0x4E;
+        cfcmovnle, cfcmovnle3 => 0x4F;
+    }
+
+    define_cmpccxadd_methods! {
+        cmpoxadd => 0xE0;
+        cmpnoxadd => 0xE1;
+        cmpbxadd => 0xE2;
+        cmpnbxadd => 0xE3;
+        cmpzxadd => 0xE4;
+        cmpnzxadd => 0xE5;
+        cmpbexadd => 0xE6;
+        cmpnbexadd => 0xE7;
+        cmpsxadd => 0xE8;
+        cmpnsxadd => 0xE9;
+        cmppxadd => 0xEA;
+        cmpnpxadd => 0xEB;
+        cmplxadd => 0xEC;
+        cmpnlxadd => 0xED;
+        cmplexadd => 0xEE;
+        cmpnlexadd => 0xEF;
     }
 
     /// `sbb dst, src`

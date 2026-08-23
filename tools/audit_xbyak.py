@@ -21,6 +21,13 @@ UPSTREAM_FORWARDER = re.compile(
 )
 RUST_METHOD = re.compile(r"^\s*pub fn\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
 GENERATED_METHOD = re.compile(r'Insn::[A-Za-z_]+\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+MACRO_ENTRY_PAIR = re.compile(
+    r"^\s*([a-z][a-z0-9_]*)\s*,\s*([a-z][a-z0-9_]*)\s*=>",
+    re.MULTILINE,
+)
+MACRO_ENTRY_SINGLE = re.compile(
+    r"^\s*([a-z][a-z0-9_]*)\s*=>", re.MULTILINE
+)
 
 RUST_SUFFIXES = (
     "_st0_st",
@@ -148,6 +155,16 @@ def rxbyak_methods(root: Path) -> tuple[set[str], int, int]:
         aliases = re.findall(r'\("([a-z0-9_]+)"\s*,', pclmul_block.group(1))
         generated.update(aliases)
         generated.update(f"v{name}" for name in aliases)
+
+    for macro_name in ("define_ccmp_methods", "define_ctest_methods", "define_cfcmov_methods"):
+        block = re.search(rf"{macro_name}!\s*\{{(.*?)\}}", assembler, re.DOTALL)
+        if block:
+            for first, second in MACRO_ENTRY_PAIR.findall(block.group(1)):
+                generated.update((first, second))
+
+    block = re.search(r"define_cmpccxadd_methods!\s*\{(.*?)\}", assembler, re.DOTALL)
+    if block:
+        generated.update(MACRO_ENTRY_SINGLE.findall(block.group(1)))
     return handwritten | generated, len(handwritten), len(generated)
 
 
@@ -205,7 +222,7 @@ def main() -> None:
     print(f"Xbyak active 64-bit mnemonic names: {len(upstream)}")
     print(f"Xbyak active 64-bit mnemonic overloads: {upstream_form_count}")
     print(f"rxbyak handwritten public methods: {handwritten_count}")
-    print(f"rxbyak generated unique methods: {generated_count}")
+    print(f"rxbyak generated/macro unique methods: {generated_count}")
     print(f"Xbyak names matched after Rust API mapping: {len(covered)}")
     print(f"Xbyak names not matched: {len(unmatched)}")
     print(f"  compatibility aliases with an equivalent encoder: {len(equivalent_aliases)}")
