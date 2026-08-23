@@ -486,11 +486,379 @@ fn update_core_types_with_affinity(topo: &mut CpuTopology) {
 
 #[cfg(target_os = "windows")]
 fn init_topology(topo: &mut CpuTopology) -> bool {
-    // Windows topology detection is complex (GetLogicalProcessorInformationEx).
-    // For now, provide basic info from the Cpu struct.
-    let _ = topo;
-    false
+    use windows_sys::Win32::System::SystemInformation::RelationCache;
+
+    let Some((group_acc, logical_cpu_num)) = windows_group_accumulators() else {
+        return false;
+    };
+    if logical_cpu_num == 0 || logical_cpu_num >= CPU_MASK_LIMIT {
+        return false;
+    }
+    topo.logical_cpus
+        .resize_with(logical_cpu_num as usize, LogicalCpu::new);
+    topo.physical_core_num =
+        windows_populate_cores(&mut topo.logical_cpus, topo.is_hybrid, &group_acc);
+    if topo.physical_core_num == 0 {
+        return false;
+    }
+
+    let Some(buffer) = windows_query_relationship(RelationCache) else {
+        return false;
+    };
+    for entry in buffer.entries() {
+        let Ok(entry) = entry else {
+            return false;
+        };
+        if entry.relationship() != RelationCache {
+            continue;
+        }
+        let Some(cache) = entry.cache() else {
+            return false;
+        };
+        let cache_type = match cache.Level {
+            1 if cache.Type == windows_sys::Win32::System::SystemInformation::CacheInstruction => {
+                Some(CacheType::L1i)
+            }
+            1 if cache.Type == windows_sys::Win32::System::SystemInformation::CacheData => {
+                Some(CacheType::L1d)
+            }
+            2 => Some(CacheType::L2),
+            3 => Some(CacheType::L3),
+            _ => None,
+        };
+        let Some(cache_type) = cache_type else {
+            continue;
+        };
+        if !entry.contains_flexible_array::<
+            windows_sys::Win32::System::SystemInformation::GROUP_AFFINITY,
+        >(
+            std::mem::offset_of!(
+                windows_sys::Win32::System::SystemInformation::CACHE_RELATIONSHIP,
+                Anonymous
+            ),
+            WINDOWS_CACHE_GROUP_COUNT,
+        ) {
+            return false;
+        }
+        let Some(mask) = windows_cache_mask(cache, &group_acc) else {
+            return false;
+        };
+        for index in &mask {
+            let Some(logical_cpu) = topo.logical_cpus.get_mut(index as usize) else {
+                return false;
+            };
+            let target = &mut logical_cpu.caches[cache_type.index()];
+            target.size = cache.CacheSize;
+            if topo.line_size == 0 {
+                topo.line_size = u32::from(cache.LineSize);
+            }
+            target.associativity = u32::from(cache.Associativity);
+            target.shared_cpu_indices = mask.clone();
+        }
+    }
+    true
 }
+
+#[cfg(target_os = "windows")]
+struct WindowsTopologyBuffer {
+    storage: Vec<usize>,
+    byte_len: usize,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsTopologyBuffer {
+    fn entries(&self) -> impl Iterator<Item = std::result::Result<WindowsTopologyEntry<'_>, ()>> {
+        WindowsTopologyEntries {
+            buffer: self,
+            offset: 0,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct WindowsTopologyEntry<'a> {
+    bytes: &'a [u8],
+    relationship: windows_sys::Win32::System::SystemInformation::LOGICAL_PROCESSOR_RELATIONSHIP,
+}
+
+#[cfg(target_os = "windows")]
+impl<'a> WindowsTopologyEntry<'a> {
+    const HEADER_SIZE: usize = std::mem::size_of::<
+        windows_sys::Win32::System::SystemInformation::LOGICAL_PROCESSOR_RELATIONSHIP,
+    >() + std::mem::size_of::<u32>();
+
+    fn relationship(
+        self,
+    ) -> windows_sys::Win32::System::SystemInformation::LOGICAL_PROCESSOR_RELATIONSHIP {
+        self.relationship
+    }
+
+    fn payload<T>(self) -> Option<*const T> {
+        let required = Self::HEADER_SIZE.checked_add(std::mem::size_of::<T>())?;
+        if self.bytes.len() < required {
+            return None;
+        }
+        let ptr = unsafe { self.bytes.as_ptr().add(Self::HEADER_SIZE).cast::<T>() };
+        if ptr.align_offset(std::mem::align_of::<T>()) != 0 {
+            return None;
+        }
+        Some(ptr)
+    }
+
+    fn group(
+        self,
+    ) -> Option<&'a windows_sys::Win32::System::SystemInformation::GROUP_RELATIONSHIP> {
+        let ptr =
+            self.payload::<windows_sys::Win32::System::SystemInformation::GROUP_RELATIONSHIP>()?;
+        Some(unsafe { &*ptr })
+    }
+
+    fn processor(
+        self,
+    ) -> Option<&'a windows_sys::Win32::System::SystemInformation::PROCESSOR_RELATIONSHIP> {
+        let ptr = self
+            .payload::<windows_sys::Win32::System::SystemInformation::PROCESSOR_RELATIONSHIP>()?;
+        Some(unsafe { &*ptr })
+    }
+
+    fn cache(
+        self,
+    ) -> Option<&'a windows_sys::Win32::System::SystemInformation::CACHE_RELATIONSHIP> {
+        let ptr =
+            self.payload::<windows_sys::Win32::System::SystemInformation::CACHE_RELATIONSHIP>()?;
+        Some(unsafe { &*ptr })
+    }
+
+    fn contains_flexible_array<U>(self, offset: usize, count: usize) -> bool {
+        let Some(elements_size) = std::mem::size_of::<U>().checked_mul(count) else {
+            return false;
+        };
+        let Some(payload_size) = offset.checked_add(elements_size) else {
+            return false;
+        };
+        let Some(required) = Self::HEADER_SIZE.checked_add(payload_size) else {
+            return false;
+        };
+        self.bytes.len() >= required
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsTopologyEntries<'a> {
+    buffer: &'a WindowsTopologyBuffer,
+    offset: usize,
+}
+
+#[cfg(target_os = "windows")]
+impl<'a> Iterator for WindowsTopologyEntries<'a> {
+    type Item = std::result::Result<WindowsTopologyEntry<'a>, ()>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset == self.buffer.byte_len {
+            return None;
+        }
+        let Some(header_end) = self.offset.checked_add(WindowsTopologyEntry::HEADER_SIZE) else {
+            self.offset = self.buffer.byte_len;
+            return Some(Err(()));
+        };
+        if header_end > self.buffer.byte_len {
+            self.offset = self.buffer.byte_len;
+            return Some(Err(()));
+        }
+        let start = unsafe { (self.buffer.storage.as_ptr() as *const u8).add(self.offset) };
+        let relationship = unsafe {
+            start
+                .cast::<windows_sys::Win32::System::SystemInformation::LOGICAL_PROCESSOR_RELATIONSHIP>()
+                .read_unaligned()
+        };
+        let size = unsafe {
+            start
+                .add(std::mem::size_of::<
+                    windows_sys::Win32::System::SystemInformation::LOGICAL_PROCESSOR_RELATIONSHIP,
+                >())
+                .cast::<u32>()
+                .read_unaligned()
+        } as usize;
+        let Some(end) = self.offset.checked_add(size) else {
+            self.offset = self.buffer.byte_len;
+            return Some(Err(()));
+        };
+        if size < WindowsTopologyEntry::HEADER_SIZE || end > self.buffer.byte_len {
+            self.offset = self.buffer.byte_len;
+            return Some(Err(()));
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(start, size) };
+        self.offset += size;
+        Some(Ok(WindowsTopologyEntry {
+            bytes,
+            relationship,
+        }))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_query_relationship(
+    relationship: windows_sys::Win32::System::SystemInformation::LOGICAL_PROCESSOR_RELATIONSHIP,
+) -> Option<WindowsTopologyBuffer> {
+    use windows_sys::Win32::System::SystemInformation::GetLogicalProcessorInformationEx;
+
+    let mut byte_len = 0u32;
+    unsafe {
+        GetLogicalProcessorInformationEx(relationship, std::ptr::null_mut(), &mut byte_len);
+    }
+    if byte_len == 0 {
+        return None;
+    }
+    let word_count = (byte_len as usize).div_ceil(std::mem::size_of::<usize>());
+    let mut storage = vec![0usize; word_count];
+    let mut returned_len = byte_len;
+    let result = unsafe {
+        GetLogicalProcessorInformationEx(
+            relationship,
+            storage.as_mut_ptr()
+                as *mut windows_sys::Win32::System::SystemInformation::SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+            &mut returned_len,
+        )
+    };
+    if result == 0 || returned_len == 0 || returned_len > byte_len {
+        return None;
+    }
+    Some(WindowsTopologyBuffer {
+        storage,
+        byte_len: returned_len as usize,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn windows_group_accumulators() -> Option<(Vec<u32>, u32)> {
+    use windows_sys::Win32::System::SystemInformation::{RelationGroup, PROCESSOR_GROUP_INFO};
+
+    let buffer = windows_query_relationship(RelationGroup)?;
+    let mut group_entry = None;
+    for entry in buffer.entries() {
+        let entry = entry.ok()?;
+        if entry.relationship() == RelationGroup {
+            group_entry = Some(entry);
+            break;
+        }
+    }
+    let entry = group_entry?;
+    let group = entry.group()?;
+    if group.ActiveGroupCount == 0 {
+        return None;
+    }
+    if !entry.contains_flexible_array::<PROCESSOR_GROUP_INFO>(
+        std::mem::offset_of!(
+            windows_sys::Win32::System::SystemInformation::GROUP_RELATIONSHIP,
+            GroupInfo
+        ),
+        group.ActiveGroupCount as usize,
+    ) {
+        return None;
+    }
+    let group_info = std::ptr::addr_of!(group.GroupInfo) as *const PROCESSOR_GROUP_INFO;
+    let mut accumulators = Vec::with_capacity(group.ActiveGroupCount as usize);
+    let mut total = 0u32;
+    for index in 0..group.ActiveGroupCount as usize {
+        accumulators.push(total);
+        total = total.checked_add(u32::from(unsafe {
+            (*group_info.add(index)).ActiveProcessorCount
+        }))?;
+    }
+    Some((accumulators, total))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_populate_cores(
+    logical_cpus: &mut [LogicalCpu],
+    is_hybrid: bool,
+    group_acc: &[u32],
+) -> usize {
+    use windows_sys::Win32::System::SystemInformation::{RelationProcessorCore, GROUP_AFFINITY};
+
+    let Some(buffer) = windows_query_relationship(RelationProcessorCore) else {
+        return 0;
+    };
+    let mut core_index = 0u32;
+    for entry in buffer.entries() {
+        let Ok(entry) = entry else {
+            return 0;
+        };
+        if entry.relationship() != RelationProcessorCore {
+            continue;
+        }
+        let Some(core) = entry.processor() else {
+            return 0;
+        };
+        if !entry.contains_flexible_array::<GROUP_AFFINITY>(
+            std::mem::offset_of!(
+                windows_sys::Win32::System::SystemInformation::PROCESSOR_RELATIONSHIP,
+                GroupMask
+            ),
+            core.GroupCount as usize,
+        ) {
+            return 0;
+        }
+        let logical = LogicalCpu {
+            core_id: core_index,
+            core_type: if !is_hybrid {
+                CoreType::Standard
+            } else if core.EfficiencyClass > 0 {
+                CoreType::Performance
+            } else {
+                CoreType::Efficient
+            },
+            caches: Default::default(),
+        };
+        core_index += 1;
+        let masks = std::ptr::addr_of!(core.GroupMask) as *const GROUP_AFFINITY;
+        for mask_index in 0..core.GroupCount as usize {
+            let mask = unsafe { *masks.add(mask_index) };
+            let Some(base) = group_acc.get(mask.Group as usize).copied() else {
+                return 0;
+            };
+            for bit in 0..usize::BITS {
+                if mask.Mask & (1usize << bit) == 0 {
+                    continue;
+                }
+                let index = base + bit;
+                let Some(target) = logical_cpus.get_mut(index as usize) else {
+                    return 0;
+                };
+                *target = logical.clone();
+            }
+        }
+    }
+    core_index as usize
+}
+
+#[cfg(target_os = "windows")]
+fn windows_cache_mask(
+    cache: &windows_sys::Win32::System::SystemInformation::CACHE_RELATIONSHIP,
+    group_acc: &[u32],
+) -> Option<CpuMask> {
+    use windows_sys::Win32::System::SystemInformation::GROUP_AFFINITY;
+
+    let masks = std::ptr::addr_of!(cache.Anonymous.GroupMasks) as *const GROUP_AFFINITY;
+    let mut result = CpuMask::new();
+    for index in 0..WINDOWS_CACHE_GROUP_COUNT {
+        let group_mask = unsafe { *masks.add(index) };
+        let base = group_acc.get(group_mask.Group as usize).copied()?;
+        for bit in 0..usize::BITS {
+            if group_mask.Mask & (1usize << bit) != 0 {
+                result.append(base + bit).ok()?;
+            }
+        }
+    }
+    Some(result)
+}
+
+// Xbyak uses the legacy single GroupMask unless NTDDI_VERSION explicitly
+// selects Windows 10 20H1 or newer. Rust does not receive that C SDK macro, so
+// preserve Xbyak's conservative default.
+#[cfg(target_os = "windows")]
+const WINDOWS_CACHE_GROUP_COUNT: usize = 1;
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn init_topology(topo: &mut CpuTopology) -> bool {
@@ -615,5 +983,14 @@ mod tests {
             get_core_type(),
             CoreType::Performance | CoreType::Efficient | CoreType::Standard
         ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_windows_topology_contract() {
+        let topology = CpuTopology::new(&Cpu::new()).unwrap();
+        assert!(topology.logical_cpu_count() > 0);
+        assert!(topology.logical_cpu_count() < CPU_MASK_LIMIT as usize);
+        assert!(topology.physical_core_count() > 0);
     }
 }
