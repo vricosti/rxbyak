@@ -645,6 +645,50 @@ impl CodeBuffer {
         Ok(true)
     }
 
+    /// Encode Xbyak's `(r, r, r/m)` BMI/APX form.
+    ///
+    /// This is the direct counterpart of `xbyak.h::opRRO`: classic registers
+    /// use VEX, while EGPR operands (or destination NF) select EVEX-legacy.
+    #[inline]
+    pub(crate) fn op_rro(
+        &mut self,
+        d: &Reg,
+        r1: &Reg,
+        op2: &RegMem,
+        mut type_: TypeFlags,
+        code: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        let bit = d.get_bit();
+        if r1.get_bit() != bit || (op2.is_reg() && op2.get_bit() != bit) {
+            return Err(Error::BadCombination);
+        }
+        type_ = type_
+            | if bit == 64 {
+                TypeFlags::T_W1
+            } else {
+                TypeFlags::T_W0
+            };
+
+        if d.has_rex2() || r1.has_rex2() || op2.has_rex2() || d.get_nf() {
+            self.op_roo(
+                r1,
+                op2,
+                &RegMem::Reg(*d),
+                type_,
+                code,
+                u8::from(imm8.is_some()),
+                None,
+            )?;
+            if let Some(imm) = imm8 {
+                self.db(imm)?;
+            }
+            Ok(())
+        } else {
+            self.op_vex(d, Some(r1), op2, type_, code, imm8)
+        }
+    }
+
     /// Encode reg-reg instruction: REX + opcode + ModR/M(mod=3).
     #[inline]
     pub(crate) fn op_rr(&mut self, r1: &Reg, r2: &Reg, type_: TypeFlags, code: u8) -> Result<()> {

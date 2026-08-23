@@ -490,6 +490,13 @@ impl RegMem {
             RegMem::Mem(m) => m.has_rex2(),
         }
     }
+
+    pub(crate) fn has_rex2(&self) -> bool {
+        match self {
+            RegMem::Reg(r) => r.has_rex2(),
+            RegMem::Mem(m) => m.has_rex2(),
+        }
+    }
 }
 
 impl From<Reg> for RegMem {

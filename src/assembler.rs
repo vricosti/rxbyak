@@ -797,6 +797,44 @@ impl CodeAssembler {
         self.arith_op(dst, src, 0)
     }
 
+    fn rao_int(&mut self, addr: Address, reg: Reg, prefix: TypeFlags) -> Result<()> {
+        if !reg.is_reg() || (!reg.is_bit(32) && !reg.is_bit(64)) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_mr_alt(
+            &addr,
+            &reg,
+            prefix | TypeFlags::T_0F38,
+            0xFC,
+            prefix | TypeFlags::T_APX,
+            0xFC,
+        )
+    }
+
+    /// `aadd m32/m64, r32/r64` — RAO-INT atomic add.
+    #[inline]
+    pub fn aadd(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::NONE)
+    }
+
+    /// `aand m32/m64, r32/r64` — RAO-INT atomic AND.
+    #[inline]
+    pub fn aand(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::T_66)
+    }
+
+    /// `aor m32/m64, r32/r64` — RAO-INT atomic OR.
+    #[inline]
+    pub fn aor(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::T_F2)
+    }
+
+    /// `axor m32/m64, r32/r64` — RAO-INT atomic XOR.
+    #[inline]
+    pub fn axor(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::T_F3)
+    }
+
     /// `or dst, src`
     #[inline]
     pub fn or_(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>) -> Result<()> {
@@ -807,6 +845,62 @@ impl CodeAssembler {
     #[inline]
     pub fn adc(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>) -> Result<()> {
         self.arith_op(dst, src, 2)
+    }
+
+    fn adcx_adox(&mut self, reg: Reg, op: RegMem, prefix: TypeFlags) -> Result<()> {
+        if !reg.is_reg() || (!reg.is_bit(32) && !reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if self.buf.op_roo(
+            &Reg::default(),
+            &op,
+            &RegMem::Reg(reg),
+            prefix,
+            0x66,
+            0,
+            None,
+        )? {
+            return Ok(());
+        }
+        self.buf
+            .op_ro(&reg, &op, prefix | TypeFlags::T_0F38, 0xF6, true, 0)
+    }
+
+    fn adcx_adox3(&mut self, dst: Reg, reg: Reg, op: RegMem, prefix: TypeFlags) -> Result<()> {
+        if !dst.is_reg()
+            || (!dst.is_bit(32) && !dst.is_bit(64))
+            || !reg.is_reg()
+            || (!reg.is_bit(32) && !reg.is_bit(64))
+        {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf
+            .op_roo(&dst, &op, &RegMem::Reg(reg), prefix, 0x66, 0, None)?;
+        Ok(())
+    }
+
+    /// `adcx r32/r64, r/m32/r/m64` — carry-chain addition.
+    #[inline]
+    pub fn adcx(&mut self, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox(reg, op.into(), TypeFlags::T_66)
+    }
+
+    /// Xbyak's three-operand `adcx d, reg, r/m` APX form.
+    #[inline]
+    pub fn adcx3(&mut self, dst: Reg, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox3(dst, reg, op.into(), TypeFlags::T_66)
+    }
+
+    /// `adox r32/r64, r/m32/r/m64` — overflow-chain addition.
+    #[inline]
+    pub fn adox(&mut self, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox(reg, op.into(), TypeFlags::T_F3)
+    }
+
+    /// Xbyak's three-operand `adox d, reg, r/m` APX form.
+    #[inline]
+    pub fn adox3(&mut self, dst: Reg, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox3(dst, reg, op.into(), TypeFlags::T_F3)
     }
 
     /// `sbb dst, src`
@@ -4873,69 +4967,100 @@ impl CodeAssembler {
         self.buf.db(0xC8 + (reg.get_idx() & 7))
     }
 
-    /// `rorx r32/r64, r/m32/r/m64, imm8` — VEX.LZ.F2.0F3A.F0 /r ib.
-    ///
-    /// RORX is kept as a hand-written size-dependent encoder: unlike the
-    /// generated SIMD tables, VEX.W follows the scalar destination width.
+    fn bmi_op_rro(
+        &mut self,
+        dst: Reg,
+        reg: Reg,
+        op: RegMem,
+        flags: TypeFlags,
+        opcode: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        if !dst.is_reg()
+            || (!dst.is_bit(32) && !dst.is_bit(64))
+            || !reg.is_reg()
+            || (!reg.is_bit(32) && !reg.is_bit(64))
+        {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_rro(&dst, &reg, &op, flags, opcode, imm8)
+    }
+
+    /// `rorx r32/r64, r/m32/r/m64, imm8` — VEX/APX.LZ.F2.0F3A.F0 /r ib.
     #[inline]
     pub fn rorx(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
-        if !dst.is_bit(32) && !dst.is_bit(64) {
-            return Err(Error::BadCombination);
-        }
-        let src = src.into();
-        if let RegMem::Reg(src_reg) = src {
-            if src_reg.get_bit() != dst.get_bit() {
-                return Err(Error::BadCombination);
-            }
-        }
-        let mut flags = TypeFlags::T_F2 | TypeFlags::T_0F3A;
-        flags = flags
-            | if dst.is_bit(64) {
-                TypeFlags::T_W1
-            } else {
-                TypeFlags::T_W0
-            };
-        self.buf.op_vex(&dst, None, &src, flags, 0xF0, Some(imm))
+        let bit = dst.get_bit();
+        self.bmi_op_rro(
+            dst,
+            Reg::new(0, crate::operand::Kind::Reg, bit),
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F3A,
+            0xF0,
+            Some(imm),
+        )
     }
 
-    fn bmi_vex_flags(dst: Reg, mandatory_prefix: TypeFlags) -> Result<TypeFlags> {
-        if !dst.is_bit(32) && !dst.is_bit(64) {
+    fn bmi_rro(
+        &mut self,
+        dst: Reg,
+        src: RegMem,
+        extension: u8,
+        prefix: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_reg() || (!dst.is_bit(32) && !dst.is_bit(64)) {
             return Err(Error::BadCombination);
         }
-        Ok(TypeFlags::T_0F38
-            | mandatory_prefix
-            | if dst.is_bit(64) {
-                TypeFlags::T_W1
-            } else {
-                TypeFlags::T_W0
-            })
+        let extension = Reg::new(extension, crate::operand::Kind::Reg, dst.get_bit());
+        self.buf.op_rro(
+            &extension,
+            &dst,
+            &src,
+            TypeFlags::T_APX | TypeFlags::T_0F38 | prefix,
+            opcode,
+            None,
+        )
     }
 
-    fn check_bmi_reg_width(dst: Reg, reg: Reg) -> Result<()> {
-        if reg.get_bit() != dst.get_bit() {
-            return Err(Error::BadCombination);
-        }
-        Ok(())
+    /// `blsi r32/r64, r/m32/r/m64` — extract lowest set bit.
+    #[inline]
+    pub fn blsi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_rro(dst, src.into(), 3, TypeFlags::T_NF, 0xF3)
     }
 
-    fn check_bmi_rm_width(dst: Reg, operand: &RegMem) -> Result<()> {
-        if let RegMem::Reg(reg) = operand {
-            Self::check_bmi_reg_width(dst, *reg)?;
-        }
-        Ok(())
+    /// `blsmsk r32/r64, r/m32/r/m64` — mask through lowest set bit.
+    #[inline]
+    pub fn blsmsk(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_rro(dst, src.into(), 2, TypeFlags::T_NF, 0xF3)
+    }
+
+    /// `blsr r32/r64, r/m32/r/m64` — reset lowest set bit.
+    #[inline]
+    pub fn blsr(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_rro(dst, src.into(), 1, TypeFlags::T_NF, 0xF3)
+    }
+
+    /// `mulx r32/r64, r32/r64, r/m32/r/m64` — flagless multiply.
+    #[inline]
+    pub fn mulx(&mut self, dst1: Reg, dst2: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_op_rro(
+            dst1,
+            dst2,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F38,
+            0xF6,
+            None,
+        )
     }
 
     /// `shlx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.66.0F38.F7 /r.
     #[inline]
     pub fn shlx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, shift)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&shift),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::T_66)?,
+        self.bmi_op_rro(
+            dst,
+            shift,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_66 | TypeFlags::T_0F38,
             0xF7,
             None,
         )
@@ -4944,14 +5069,11 @@ impl CodeAssembler {
     /// `shrx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.F2.0F38.F7 /r.
     #[inline]
     pub fn shrx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, shift)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&shift),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F2)?,
+        self.bmi_op_rro(
+            dst,
+            shift,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F38,
             0xF7,
             None,
         )
@@ -4960,14 +5082,11 @@ impl CodeAssembler {
     /// `sarx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.F3.0F38.F7 /r.
     #[inline]
     pub fn sarx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, shift)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&shift),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F3)?,
+        self.bmi_op_rro(
+            dst,
+            shift,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F3 | TypeFlags::T_0F38,
             0xF7,
             None,
         )
@@ -4976,14 +5095,11 @@ impl CodeAssembler {
     /// `andn r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.0F38.F2 /r.
     #[inline]
     pub fn andn(&mut self, dst: Reg, inverted: Reg, value: impl Into<RegMem>) -> Result<()> {
-        let value = value.into();
-        Self::check_bmi_reg_width(dst, inverted)?;
-        Self::check_bmi_rm_width(dst, &value)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&inverted),
-            &value,
-            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+        self.bmi_op_rro(
+            dst,
+            inverted,
+            value.into(),
+            TypeFlags::T_APX | TypeFlags::T_0F38 | TypeFlags::T_NF,
             0xF2,
             None,
         )
@@ -4992,14 +5108,11 @@ impl CodeAssembler {
     /// `bextr r32/r64, r/m32/r/m64, r32/r64` — VEX.NDS.LZ.0F38.F7 /r.
     #[inline]
     pub fn bextr(&mut self, dst: Reg, src: impl Into<RegMem>, control: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, control)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&control),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+        self.bmi_op_rro(
+            dst,
+            control,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_0F38 | TypeFlags::T_NF,
             0xF7,
             None,
         )
@@ -5008,14 +5121,11 @@ impl CodeAssembler {
     /// `bzhi r32/r64, r/m32/r/m64, r32/r64` — VEX.NDS.LZ.0F38.F5 /r.
     #[inline]
     pub fn bzhi(&mut self, dst: Reg, src: impl Into<RegMem>, index: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, index)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&index),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+        self.bmi_op_rro(
+            dst,
+            index,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_0F38 | TypeFlags::T_NF,
             0xF5,
             None,
         )
@@ -5024,14 +5134,11 @@ impl CodeAssembler {
     /// `pdep r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.F2.0F38.F5 /r.
     #[inline]
     pub fn pdep(&mut self, dst: Reg, src: Reg, mask: impl Into<RegMem>) -> Result<()> {
-        let mask = mask.into();
-        Self::check_bmi_reg_width(dst, src)?;
-        Self::check_bmi_rm_width(dst, &mask)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&src),
-            &mask,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F2)?,
+        self.bmi_op_rro(
+            dst,
+            src,
+            mask.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F38,
             0xF5,
             None,
         )
@@ -5040,14 +5147,11 @@ impl CodeAssembler {
     /// `pext r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.F3.0F38.F5 /r.
     #[inline]
     pub fn pext(&mut self, dst: Reg, src: Reg, mask: impl Into<RegMem>) -> Result<()> {
-        let mask = mask.into();
-        Self::check_bmi_reg_width(dst, src)?;
-        Self::check_bmi_rm_width(dst, &mask)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&src),
-            &mask,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F3)?,
+        self.bmi_op_rro(
+            dst,
+            src,
+            mask.into(),
+            TypeFlags::T_APX | TypeFlags::T_F3 | TypeFlags::T_0F38,
             0xF5,
             None,
         )

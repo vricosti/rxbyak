@@ -85,6 +85,8 @@ method names with suffixes:
   sar(op, cl)                   sar_cl(op)
   bt(op, reg)                   bt(op, reg)
   bt(op, imm)                   bt_imm(op, imm)
+  adcx(d, reg, op)              adcx3(d, reg, op)
+  adox(d, reg, op)              adox3(d, reg, op)
   shld(op, reg, imm)            shld(op, reg, imm)
   shld(op, reg, cl)             shld_cl(op, reg)
   pslld(xmm, xmm)              pslld(xmm, xmm)          [SSE register form]
@@ -395,12 +397,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 760
+  rxbyak handwritten public instruction methods: 772
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1641
-  Xbyak names not matched:                        238
+  Xbyak names matched after Rust API mapping:    1651
+  Xbyak names not matched:                        228
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    238
+    missing encoder/API names:                    228
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -627,3 +629,18 @@ Differential tests cover both MOVBE directions, legacy r8-r15 and APX r16-r31,
 MOVDIR64B's exact `cvt32` behavior, MOVNTDQA's XMM16 rejection, and Xbyak's
 otherwise permissive derived-register behavior. No binary-layout-bearing type
 changes in this slice.
+
+The scalar APX/BMI slice ports xbyak.h `opRRO` without collapsing its encoding
+choice: operand widths are checked first, W follows the destination, classic
+registers use VEX, and EGPR or destination-NF state uses `opROO`/EVEX-legacy.
+The RegMem `has_rex2` query intentionally excludes source NF/ZU, matching the
+exact narrower predicate used by Xbyak's helper. The pre-existing RORX, SHLX,
+SHRX, SARX, ANDN, BEXTR, BZHI, PDEP and PEXT methods now route through this
+helper too; this restores their APX/EGPR forms and ANDN/BEXTR/BZHI NF support.
+
+RAO-INT AADD/AAND/AOR/AXOR, ADCX/ADOX, BLSI/BLSMSK/BLSR and MULX are now
+public. Rust exposes Xbyak's overloaded three-operand ADCX/ADOX forms as
+`adcx3`/`adox3`; all methods remain in the mnemonic-owning assembler module.
+Exact-byte regressions generated with Xbyak v7.40 cover legacy, VEX, APX,
+EGPR, NF, register, memory, immediate and invalid-width paths. No
+binary-layout-bearing type changes in this slice.
