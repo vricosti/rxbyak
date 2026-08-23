@@ -3,7 +3,7 @@ use crate::code_array::{AllocMode, CodeBuffer, LabelMode};
 use crate::encoding_flags::TypeFlags;
 use crate::error::{Error, Result};
 use crate::label::{JmpLabel, JmpType, Label, LabelId, LabelManager};
-use crate::operand::{Reg, RegMem, RegMemImm};
+use crate::operand::{Reg, RegMem, RegMemImm, Segment};
 
 /// The main assembler struct. Users create an instance, emit instructions,
 /// then call `ready()` to finalize and obtain executable code.
@@ -155,6 +155,14 @@ impl CodeAssembler {
         self.buf.dq(v)
     }
 
+    /// Emit a segment-override prefix.
+    ///
+    /// Mirrors Xbyak `CodeGenerator::putSeg`.
+    #[inline]
+    pub fn put_seg(&mut self, segment: Segment) -> Result<()> {
+        self.buf.db(segment.prefix())
+    }
+
     /// Align the code to a boundary using Xbyak's preferred multi-byte NOPs.
     #[inline]
     pub fn align(&mut self, n: usize) -> Result<()> {
@@ -212,9 +220,9 @@ impl CodeAssembler {
             } else if mode == LabelMode::Abs {
                 // Absolute address: top + label_offset
                 let addr = self.buf.top() as u64 + offset as u64;
-                self.buf.rewrite(patch_offset, addr, size as usize);
+                self.buf.rewrite(patch_offset, addr, size as usize)?;
             } else {
-                self.buf.rewrite(patch_offset, disp, size as usize);
+                self.buf.rewrite(patch_offset, disp, size as usize)?;
             }
         }
         Ok(())

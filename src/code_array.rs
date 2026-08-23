@@ -208,13 +208,20 @@ impl CodeBuffer {
     }
 
     /// Rewrite bytes at a specific offset.
-    pub fn rewrite(&mut self, offset: usize, val: u64, size: usize) {
+    pub fn rewrite(&mut self, offset: usize, val: u64, size: usize) -> Result<()> {
+        if offset >= self.capacity || size > self.capacity - offset {
+            return Err(Error::OffsetIsTooBig);
+        }
+        if !matches!(size, 1 | 2 | 4 | 8) {
+            return Err(Error::BadParameter);
+        }
         let bytes = val.to_le_bytes();
-        for i in 0..size {
+        for (i, byte) in bytes.iter().copied().enumerate().take(size) {
             unsafe {
-                *self.ptr.add(offset + i) = bytes[i];
+                *self.ptr.add(offset + i) = byte;
             }
         }
+        Ok(())
     }
 
     /// Save an address info for later resolution (labels).
@@ -391,5 +398,16 @@ mod tests {
         assert_eq!(buf.size, 0);
         assert!(buf.addr_info_list.is_empty());
         assert!(!buf.calc_jmp_called);
+    }
+
+    #[test]
+    fn test_rewrite_checks_full_range_and_size() {
+        let mut buf = CodeBuffer::new(8, AllocMode::Alloc).unwrap();
+        buf.dd(0).unwrap();
+        assert_eq!(buf.rewrite(0, 0x4433_2211, 4), Ok(()));
+        assert_eq!(buf.as_slice(), &[0x11, 0x22, 0x33, 0x44]);
+        assert_eq!(buf.rewrite(7, 0, 2), Err(Error::OffsetIsTooBig));
+        assert_eq!(buf.rewrite(8, 0, 1), Err(Error::OffsetIsTooBig));
+        assert_eq!(buf.rewrite(0, 0, 3), Err(Error::BadParameter));
     }
 }

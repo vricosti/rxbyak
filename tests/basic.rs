@@ -109,6 +109,31 @@ fn test_int3() {
 }
 
 #[test]
+fn test_xbyak_segment_prefixes() {
+    let code = assemble(|a| {
+        a.put_seg(ES)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(CS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(SS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(DS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(FS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(GS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))
+    });
+    assert_eq!(
+        code,
+        [
+            0x26, 0x67, 0x8B, 0x00, 0x2E, 0x67, 0x8B, 0x00, 0x36, 0x67, 0x8B, 0x00, 0x3E, 0x67,
+            0x8B, 0x00, 0x64, 0x67, 0x8B, 0x00, 0x65, 0x67, 0x8B, 0x00,
+        ]
+    );
+}
+
+#[test]
 fn test_push_pop_rax() {
     let code = assemble(|a| {
         a.push(RAX)?;

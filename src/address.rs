@@ -98,7 +98,9 @@ impl RegExp {
     pub fn rip_addr(addr: i64) -> Self {
         Self {
             rip: true,
-            is_addr: true,
+            // Xbyak 7.35 treats a null pointer as the integer displacement
+            // zero instead of an absolute target address.
+            is_addr: addr != 0,
             disp: addr,
             ..Default::default()
         }
@@ -404,6 +406,15 @@ impl Address {
         self.exp.base.has_rex2() || self.exp.index.has_rex2()
     }
 
+    /// Return a copy with a different memory-size hint.
+    ///
+    /// Mirrors Xbyak 7.37 `Address::changeBit`.
+    pub fn change_bit(&self, bit: u16) -> Self {
+        let mut addr = *self;
+        addr.bit = bit;
+        addr
+    }
+
     /// Set immediate size for this address context.
     pub fn with_imm_size(mut self, imm_size: u8) -> Self {
         self.imm_size = imm_size;
@@ -523,5 +534,22 @@ mod tests {
         assert_eq!(opt.get_base().get_idx(), 1);
         assert_eq!(opt.get_index().get_idx(), 1);
         assert_eq!(opt.get_scale(), 1);
+    }
+
+    #[test]
+    fn test_null_rip_address_is_plain_displacement() {
+        let addr = ptr(RegExp::rip_addr(0));
+        assert_eq!(addr.get_mode(), AddressMode::Rip);
+        assert_eq!(addr.get_disp(), 0);
+    }
+
+    #[test]
+    fn test_address_change_bit_preserves_expression() {
+        let byte = byte_ptr(RAX + 16);
+        let dword = byte.change_bit(32);
+        assert_eq!(byte.get_bit(), 8);
+        assert_eq!(dword.get_bit(), 32);
+        assert_eq!(dword.get_reg_exp().get_base(), &RAX);
+        assert_eq!(dword.get_disp(), 16);
     }
 }

@@ -425,3 +425,9 @@ changes in that version range still require a separate lifecycle, addressing,
 StackFrame and validation audit. The wider pre-v7.33.3 unmatched set also needs
 classification and operand-form review; this document no longer claims that
 the existing instruction list proves full Xbyak parity.
+
+The first non-mnemonic parity slice also ports Xbyak 7.35-7.37 behavior for a
+null RIP target (`RegExp(0)` is an integer displacement), bounds-checks the
+entire `CodeArray::rewrite` range, exposes `Address::changeBit`, and adds the
+previously absent `CodeGenerator::putSeg` counterpart. Segment-prefix tests use
+the exact byte sequence from Xbyak's upstream regression test.
