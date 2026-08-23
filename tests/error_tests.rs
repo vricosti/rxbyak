@@ -204,6 +204,13 @@ fn test_valid_evex_masks() {
 }
 
 #[test]
+fn test_legacy_sse_rejects_xmm16_like_xbyak() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(asm.addps(XMM16, XMM1), Err(Error::NotSupported));
+    assert_eq!(asm.addps(XMM1, XMM16), Err(Error::NotSupported));
+}
+
+#[test]
 fn test_valid_rounding_modes() {
     let mut asm = CodeAssembler::new(4096).unwrap();
     asm.vaddps(ZMM0, ZMM1, ZMM2.rounding(Rounding::RnSae))

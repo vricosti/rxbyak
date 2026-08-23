@@ -772,6 +772,11 @@ impl CodeBuffer {
         code: u8,
         imm8: Option<u8>,
     ) -> Result<()> {
+        if (r.is_xmm() && r.get_idx() >= 16)
+            || matches!(op, RegMem::Reg(reg) if reg.is_xmm() && reg.get_idx() >= 16)
+        {
+            return Err(Error::NotSupported);
+        }
         self.op_ro(r, op, type_, code, true, if imm8.is_some() { 1 } else { 0 })?;
         if let Some(imm) = imm8 {
             self.db(imm)?;

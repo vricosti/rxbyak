@@ -591,3 +591,12 @@ Exact-byte regressions cover WAIT versus FN forms, low and extended complex
 addresses, the REX.W-only distinction of FXRSTOR64, invalid unsized integer
 memory, and the AX validation. Every expected sequence was generated with
 Xbyak v7.40. No binary-layout-bearing type changes in this slice.
+
+Before the MMX interoperability slice, the shared legacy-SSE encoder now ports
+xbyak.h `isValidSSE` ordering inside `opSSE`: after family-specific operand
+validation and before `opRO`, either operand being XMM16-XMM31 returns
+NotSupported. Both destination and source rejection paths were confirmed with
+a Xbyak v7.40 probe and are retained as focused regressions. Store helpers that
+do not route through `op_sse` are outside this helper-specific prerequisite and
+remain subject to their own operand-form audit. No binary-layout-bearing type
+changes in this slice.
