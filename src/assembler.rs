@@ -1040,6 +1040,30 @@ impl CodeAssembler {
     pub fn jge(&mut self, label: &Label, t: JmpType) -> Result<()> {
         self.jnl(label, t)
     }
+    #[inline]
+    pub fn jna(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jbe(label, t)
+    }
+    #[inline]
+    pub fn jnae(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jb(label, t)
+    }
+    #[inline]
+    pub fn jng(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jle(label, t)
+    }
+    #[inline]
+    pub fn jnge(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jl(label, t)
+    }
+    #[inline]
+    pub fn jpe(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jp(label, t)
+    }
+    #[inline]
+    pub fn jpo(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jnp(label, t)
+    }
 
     /// `int3` — Software breakpoint.
     #[inline]
@@ -1189,6 +1213,12 @@ impl CodeAssembler {
         self.shift_op(op.into(), imm, 4)
     }
 
+    /// `sal r/m, imm` — Xbyak spelling alias for `shl`.
+    #[inline]
+    pub fn sal(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.shl(op, imm)
+    }
+
     /// `shr r/m, imm`
     #[inline]
     pub fn shr(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
@@ -1234,6 +1264,12 @@ impl CodeAssembler {
     #[inline]
     pub fn shl_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
         self.shift_op_cl(op.into(), 4)
+    }
+
+    /// `sal r/m, CL` — Xbyak spelling alias for `shl`.
+    #[inline]
+    pub fn sal_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.shl_cl(op)
     }
 
     /// `shr r/m, CL`
@@ -1867,6 +1903,97 @@ impl CodeAssembler {
     }
 
     // ─── AVX Instructions (VEX-encoded) ─────────────────────────
+
+    /// Rust counterpart of Xbyak's vector-result and opmask-result `vcmp*`
+    /// overloads. The destination register kind selects the upstream overload.
+    fn vcmp_dispatch(
+        &mut self,
+        dst: Reg,
+        src1: Reg,
+        src2: impl Into<RegMem>,
+        imm: u8,
+        vector_type: TypeFlags,
+        opmask_type: TypeFlags,
+    ) -> Result<()> {
+        if dst.is_opmask() {
+            self.op_avx_k_x_xm(dst, src1, src2, opmask_type, 0xC2, Some(imm))
+        } else {
+            self.op_avx_x_x_xm(dst, src1, src2, vector_type, 0xC2, Some(imm))
+        }
+    }
+
+    /// `vcmppd` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmppd(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_YMM,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B64,
+        )
+    }
+
+    /// `vcmpps` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmpps(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_0F | TypeFlags::T_YMM,
+            TypeFlags::T_0F
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+        )
+    }
+
+    /// `vcmpsd` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmpsd(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_F2 | TypeFlags::T_0F,
+            TypeFlags::T_N8
+                | TypeFlags::T_F2
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX,
+        )
+    }
+
+    /// `vcmpss` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmpss(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            TypeFlags::T_N4
+                | TypeFlags::T_F3
+                | TypeFlags::T_0F
+                | TypeFlags::T_W0
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX,
+        )
+    }
 
     /// `vmovq xmm/m64/r64, xmm/m64/r64`
     ///
@@ -3144,8 +3271,16 @@ impl CodeAssembler {
         self.buf.db(0x9D)
     }
     #[inline]
+    pub fn popfq(&mut self) -> Result<()> {
+        self.popf()
+    }
+    #[inline]
     pub fn pushf(&mut self) -> Result<()> {
         self.buf.db(0x9C)
+    }
+    #[inline]
+    pub fn pushfq(&mut self) -> Result<()> {
+        self.pushf()
     }
     #[inline]
     pub fn stmxcsr(&mut self, addr: Address) -> Result<()> {
@@ -6012,6 +6147,10 @@ impl CodeAssembler {
     #[inline]
     pub fn fwait(&mut self) -> Result<()> {
         self.buf.db(0x9B)
+    }
+    #[inline]
+    pub fn wait(&mut self) -> Result<()> {
+        self.fwait()
     }
     /// `finit` — 9B DB E3
     #[inline]

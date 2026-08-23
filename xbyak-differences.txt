@@ -395,19 +395,20 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 657
-  rxbyak generated unique methods:               834
-  Xbyak names matched after Rust API mapping:    1379
-  Xbyak names not matched:                        500
-    compatibility aliases with existing encoder: 178
+  rxbyak handwritten public instruction methods: 672
+  rxbyak generated unique methods:              1002
+  Xbyak names matched after Rust API mapping:    1557
+  Xbyak names not matched:                        322
+    compatibility aliases with existing encoder:   0
     missing encoder/API names:                    322
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
-It separately identifies direct Xbyak forwarders and known spelling aliases;
-those 178 names still need public Rust wrappers for API parity, but their byte
-encoder already exists. The remaining 322 names require an encoder or public
-API audit. Conversely, a matched name does not prove that every Xbyak overload
-or validation rule is present. Operand-form and byte-level parity must therefore
+It separately identifies direct Xbyak forwarders and known spelling aliases.
+All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
+names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
+and POPFQ. The remaining 322 names require an encoder or public API audit.
+Conversely, a matched name does not prove that every Xbyak overload or
+validation rule is present. Operand-form and byte-level parity must therefore
 still be reviewed family by family.
 
 The original rxbyak import was made while Xbyak v7.33.3 was current. Between
@@ -450,6 +451,17 @@ The encoder-validation slice ports the Xbyak 7.35.4 `disp8*N` correction for
 It also ports Xbyak 7.37.6's common `opVex` rejection of `{z}` when `T_M_K`
 marks a memory destination. Both behaviors have focused regression tests; the
 disp8 expected bytes were generated directly with Xbyak v7.40.
+
+The compatibility-alias slice reproduces Xbyak's 32-entry compare-predicate
+table and four-entry PCLMULQDQ table in rxbyak's existing build-time generator.
+Because Rust cannot overload the vector-result and opmask-result VCMP methods,
+the four base methods dispatch on the destination register kind; this also fixes
+the previous generator behavior that silently discarded the AVX-512 overloads
+as duplicate names. Exact bytes for VEX XMM/YMM and EVEX K/XMM/YMM/ZMM base
+forms were generated with Xbyak v7.40 and checked in as regressions. The tests
+also exercise every one of the 160 compare aliases; all 128 AVX aliases are
+checked with both vector and opmask destinations. All eight PCLMUL aliases are
+covered as well.
 
 The Xbyak 7.37.2 user-wait slice ports `tpause`, `umonitor`, and `umwait`.
 Unlike rxbyak's previously absent API, these use the shared register encoder,

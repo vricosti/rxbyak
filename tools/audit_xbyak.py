@@ -128,6 +128,26 @@ def rxbyak_methods(root: Path) -> tuple[set[str], int, int]:
     generated: set[str] = set()
     for source in (root / "gen").glob("*.rs"):
         generated.update(GENERATED_METHOD.findall(source.read_text(encoding="utf-8")))
+
+    codegen = (root / "gen" / "codegen.rs").read_text(encoding="utf-8")
+    predicate_block = re.search(
+        r"const COMPARE_PREDICATES:\s*\[&str;\s*32\]\s*=\s*\[(.*?)\];",
+        codegen,
+        re.DOTALL,
+    )
+    if predicate_block:
+        predicates = re.findall(r'"([a-z0-9_]+)"', predicate_block.group(1))
+        for suffix in ("pd", "ps", "sd", "ss"):
+            generated.update(f"vcmp{predicate}{suffix}" for predicate in predicates)
+            generated.update(f"cmp{predicate}{suffix}" for predicate in predicates[:8])
+
+    pclmul_block = re.search(
+        r"const PCLMUL_ALIASES:.*?=\s*\[(.*?)\];", codegen, re.DOTALL
+    )
+    if pclmul_block:
+        aliases = re.findall(r'\("([a-z0-9_]+)"\s*,', pclmul_block.group(1))
+        generated.update(aliases)
+        generated.update(f"v{name}" for name in aliases)
     return handwritten | generated, len(handwritten), len(generated)
 
 
