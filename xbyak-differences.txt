@@ -183,6 +183,12 @@ Modifier methods return a modified copy of the register:
   .nf()                     — APX NF flag
   .zu()                     — APX ZU flag
 
+Memory operands use the same explicit modifier style for Xbyak's
+`address | kN` and `address | T_z` forms:
+
+  ptr(RAX.into()).k(1)
+  ptr(RAX.into()).k(1).z()
+
 Why: Rust's BitOr trait could work but requires a wrapper type for each
 modifier kind. Method chaining is clearer and provides type-safe access.
 

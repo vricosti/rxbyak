@@ -981,7 +981,7 @@ impl CodeBuffer {
                 // Xbyak 7.37.6: zeroing has no meaning when the architectural
                 // destination is memory. T_M_K marks those reversed forms.
                 if type_.contains(TypeFlags::T_M_K)
-                    && (r.has_zero() || p1.is_some_and(Reg::has_zero))
+                    && (r.has_zero() || p1.is_some_and(Reg::has_zero) || addr.has_zero())
                 {
                     return Err(Error::InvalidZero);
                 }
@@ -999,9 +999,14 @@ impl CodeBuffer {
                     || r.has_evex()
                     || p1.map_or(false, |p| p.has_evex())
                     || addr.is_broadcast()
+                    || addr.get_opmask_idx() != 0
                     || addr.has_rex2();
 
                 if need_evex {
+                    let aaa = addr.get_opmask_idx();
+                    if aaa != 0 && !type_.contains(TypeFlags::T_M_K) {
+                        return Err(Error::InvalidOpmaskWithMemory);
+                    }
                     let b = addr.is_broadcast();
                     if b && !type_.intersects(TypeFlags::T_B32 | TypeFlags::T_B64) {
                         return Err(Error::InvalidBroadcast);
@@ -1020,7 +1025,7 @@ impl CodeBuffer {
                         code,
                         Some(&index),
                         b,
-                        0,
+                        aaa,
                         vl,
                         hi16_vidx,
                     )?;

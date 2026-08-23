@@ -316,6 +316,10 @@ pub struct Address {
     pub(crate) permit_vsib: bool,
     /// Whether broadcast is enabled.
     pub(crate) broadcast: bool,
+    /// EVEX opmask index carried by a memory destination (`mem{k}`).
+    pub(crate) mask: u8,
+    /// Zeroing modifier preserved for Xbyak-compatible validation.
+    pub(crate) zero: bool,
     /// Whether optimization is enabled.
     pub(crate) optimize: bool,
     /// Optional label reference.
@@ -353,6 +357,8 @@ impl Address {
             disp8n: 0,
             permit_vsib: false,
             broadcast,
+            mask: 0,
+            zero: false,
             optimize: true,
         })
     }
@@ -382,6 +388,12 @@ impl Address {
     pub fn is_broadcast(&self) -> bool {
         self.broadcast
     }
+    pub fn get_opmask_idx(&self) -> u8 {
+        self.mask
+    }
+    pub fn has_zero(&self) -> bool {
+        self.zero
+    }
     pub fn is_vsib(&self) -> bool {
         self.exp.is_vsib()
     }
@@ -404,6 +416,21 @@ impl Address {
 
     pub fn has_rex2(&self) -> bool {
         self.exp.base.has_rex2() || self.exp.index.has_rex2()
+    }
+
+    /// Set the EVEX writemask on a memory operand, matching Xbyak's
+    /// `address | kN` operand modifier.
+    pub fn k(mut self, mask_idx: u8) -> Self {
+        assert!(mask_idx <= 7);
+        self.mask = mask_idx;
+        self
+    }
+
+    /// Preserve an explicitly requested zeroing modifier. Encoders reject it
+    /// where Xbyak rejects zeroing on a memory destination.
+    pub fn z(mut self) -> Self {
+        self.zero = true;
+        self
     }
 
     /// Return a copy with a different memory-size hint.
