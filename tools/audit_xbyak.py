@@ -186,6 +186,8 @@ def upstream_spellings(methods: set[str]) -> set[str]:
         "cmpsd_xmm": ("cmpsd",),
         "cmpsd_string": ("cmpsd",),
         "movsd_string": ("movsd",),
+        "vpermilpd_imm": ("vpermilpd",),
+        "vpermilps_imm": ("vpermilps",),
     }.items():
         if rust_name in methods:
             spellings.update(xbyak_names)

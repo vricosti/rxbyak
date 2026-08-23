@@ -806,3 +806,12 @@ The final overloaded-string slice exposes Xbyak's zero-operand CMPSD as
 while leaving the SSE comparison API distinct. Its single A7 byte is covered
 by the string-operation conformance test. No binary-layout-bearing type
 changes.
+
+The VPERMIL overload slice fixes a limitation of the name-only audit: Xbyak
+defines both variable-control and immediate-control VPERMILPS/VPERMILPD forms,
+but the Rust generator previously discarded the later immediate entries as
+duplicate method names. The immediate overloads now use the explicit
+`vpermilps_imm` and `vpermilpd_imm` Rust suffix convention. Exact XMM, YMM,
+ZMM, opmask and zeroing bytes were generated with Xbyak v7.40; the original
+three-operand variable-control methods remain covered separately. No
+binary-layout-bearing type changes.
