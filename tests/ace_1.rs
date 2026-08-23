@@ -44,3 +44,47 @@ fn test_bsr_instructions_reject_other_register_kinds() {
     assert_eq!(asm.bsrmovf(BSR0, XMM0, ZMM1), Err(Error::BadCombination));
     assert_eq!(asm.bsrmovh_load(ZMM0, ZMM1), Err(Error::BadCombination));
 }
+
+#[test]
+fn test_ace_amx_instructions_match_xbyak_7_40() {
+    let code = assemble(|a| {
+        a.tilemovcol_reg(TMM1, ZMM2, EAX)?;
+        a.tilemovcol_imm(TMM3, ZMM4, 0x5A)?;
+        a.top2bf16ps(TMM1, ZMM2, ZMM3)?;
+        a.top4bssd(TMM1, ZMM2, ZMM3)?;
+        a.top4bsud(TMM1, ZMM2, ZMM3)?;
+        a.top4busd(TMM1, ZMM2, ZMM3)?;
+        a.top4buud(TMM1, ZMM2, ZMM3)?;
+        a.top4mxbf8ps(TMM1, ZMM2, ZMM3, 1)?;
+        a.top4mxbhf8ps(TMM1, ZMM2, ZMM3, 2)?;
+        a.top4mxbssps(TMM1, ZMM2, ZMM3, 3)?;
+        a.top4mxhbf8ps(TMM1, ZMM2, ZMM3, 4)?;
+        a.top4mxhf8ps(TMM1, ZMM2, ZMM3, 5)
+    });
+
+    assert_eq!(
+        code,
+        [
+            0x62, 0xF2, 0xFD, 0x48, 0x4B, 0xCA, 0x62, 0xF3, 0xFD, 0x48, 0x2F, 0xDC, 0x5A, 0x62,
+            0xF2, 0x66, 0x48, 0x5C, 0xCA, 0x62, 0xF2, 0x67, 0x48, 0x5E, 0xCA, 0x62, 0xF2, 0x66,
+            0x48, 0x5E, 0xCA, 0x62, 0xF2, 0x65, 0x48, 0x5E, 0xCA, 0x62, 0xF2, 0x64, 0x48, 0x5E,
+            0xCA, 0x62, 0xF3, 0x64, 0x48, 0x8D, 0xCA, 0x01, 0x62, 0xF3, 0x67, 0x48, 0x8D, 0xCA,
+            0x02, 0x62, 0xF3, 0x67, 0x48, 0x8F, 0xCA, 0x03, 0x62, 0xF3, 0x66, 0x48, 0x8D, 0xCA,
+            0x04, 0x62, 0xF3, 0x65, 0x48, 0x8D, 0xCA, 0x05,
+        ]
+    );
+}
+
+#[test]
+fn test_ace_amx_instructions_validate_register_classes() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(
+        asm.tilemovcol_reg(ZMM0, ZMM1, EAX),
+        Err(Error::BadCombination)
+    );
+    assert_eq!(
+        asm.tilemovcol_reg(TMM0, ZMM1, RAX),
+        Err(Error::BadCombination)
+    );
+    assert_eq!(asm.top2bf16ps(TMM0, XMM1, ZMM2), Err(Error::BadCombination));
+}

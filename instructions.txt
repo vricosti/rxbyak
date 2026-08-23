@@ -1397,9 +1397,21 @@ tdpbuud
 tdpfp16ps
 tileloadd
 tileloaddt1
+tilemovcol_imm
+tilemovcol_reg
 tilerelease
 tilestored
 tilezero
+top2bf16ps
+top4bssd
+top4bsud
+top4busd
+top4buud
+top4mxbf8ps
+top4mxbhf8ps
+top4mxbssps
+top4mxhbf8ps
+top4mxhf8ps
 
 === Opmask (AVX-512 k-registers) ===
 

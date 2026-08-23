@@ -6030,8 +6030,115 @@ impl CodeAssembler {
     // AMX (Advanced Matrix Extensions) tile instructions
     // ═══════════════════════════════════════════════════════════
 
-    // AMX tile arithmetic uses VEX.128.0F38 with tmm register operands.
-    // The VEX vvvv field encodes the third tmm operand.
+    // ACE 1.15 AMX instructions use EVEX with TMM destinations and ZMM
+    // sources. The older AMX instructions below continue to use VEX.128.
+
+    /// `tilemovcol tmm, zmm, r32`
+    pub fn tilemovcol_reg(&mut self, dst: Reg, src: Reg, column: Reg) -> Result<()> {
+        if !dst.is_tmm() || !src.is_zmm() || !column.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&column),
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_EW1 | TypeFlags::T_MUST_EVEX,
+            0x4B,
+            None,
+        )
+    }
+
+    /// `tilemovcol tmm, zmm, imm8`
+    pub fn tilemovcol_imm(&mut self, dst: Reg, src: Reg, column: u8) -> Result<()> {
+        if !dst.is_tmm() || !src.is_zmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F3A | TypeFlags::T_EW1 | TypeFlags::T_MUST_EVEX,
+            0x2F,
+            Some(column),
+        )
+    }
+
+    /// `top2bf16ps tmm, zmm, zmm`
+    pub fn top2bf16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F3, 0x5C, None)
+    }
+
+    /// `top4bssd tmm, zmm, zmm`
+    pub fn top4bssd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F2, 0x5E, None)
+    }
+
+    /// `top4bsud tmm, zmm, zmm`
+    pub fn top4bsud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F3, 0x5E, None)
+    }
+
+    /// `top4busd tmm, zmm, zmm`
+    pub fn top4busd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_66, 0x5E, None)
+    }
+
+    /// `top4buud tmm, zmm, zmm`
+    pub fn top4buud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::NONE, 0x5E, None)
+    }
+
+    /// `top4mxbf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::NONE, 0x8D, Some(imm))
+    }
+
+    /// `top4mxbhf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxbhf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F2, 0x8D, Some(imm))
+    }
+
+    /// `top4mxbssps tmm, zmm, zmm, imm8`
+    pub fn top4mxbssps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F2, 0x8F, Some(imm))
+    }
+
+    /// `top4mxhbf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxhbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F3, 0x8D, Some(imm))
+    }
+
+    /// `top4mxhf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxhf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_66, 0x8D, Some(imm))
+    }
+
+    fn amx_zmm_op(
+        &mut self,
+        dst: Reg,
+        src1: Reg,
+        src2: Reg,
+        prefix: TypeFlags,
+        opcode: u8,
+        imm: Option<u8>,
+    ) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_zmm() || !src2.is_zmm() {
+            return Err(Error::BadCombination);
+        }
+        let map = if imm.is_some() {
+            TypeFlags::T_0F3A
+        } else {
+            TypeFlags::T_0F38
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&src2),
+            &RegMem::Reg(src1),
+            prefix | map | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            imm,
+        )
+    }
 
     /// `tilerelease` — VEX.128.NP.0F38.W0 49 C0
     #[inline]
