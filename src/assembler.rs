@@ -2525,6 +2525,763 @@ impl CodeAssembler {
         self.avx_ne_convert(dst, addr, TypeFlags::NONE, 0xB0)
     }
 
+    fn op_gather(
+        &mut self,
+        dst: Reg,
+        addr: Address,
+        mask: Reg,
+        type_: TypeFlags,
+        opcode: u8,
+        mode: u8,
+    ) -> Result<()> {
+        let exp = addr.get_reg_exp();
+        let index = *exp.get_index();
+        if !matches!(index.get_bit(), 128 | 256) {
+            return Err(Error::BadVsibAddressing);
+        }
+
+        let index_is_ymm = index.get_bit() == 256;
+        if !dst.is_xmm() || index_is_ymm || !mask.is_xmm() {
+            let valid = match mode {
+                0 => dst.is_ymm() && !index_is_ymm && mask.is_ymm(),
+                1 => dst.is_ymm() && index_is_ymm && mask.is_ymm(),
+                _ => !dst.is_ymm() && index_is_ymm && !mask.is_ymm(),
+            };
+            if !valid {
+                return Err(Error::BadVsibAddressing);
+            }
+        }
+
+        if dst.get_idx() == index.get_idx()
+            || dst.get_idx() == mask.get_idx()
+            || index.get_idx() == mask.get_idx()
+        {
+            return Err(Error::SameRegsAreInvalid);
+        }
+
+        let encoded_dst = if index_is_ymm {
+            Reg::ymm(dst.get_idx())
+        } else {
+            dst
+        };
+        let encoded_mask = if index_is_ymm {
+            Reg::ymm(mask.get_idx())
+        } else {
+            mask
+        };
+        self.op_avx_x_x_xm(encoded_dst, encoded_mask, addr, type_, opcode, None)
+    }
+
+    fn check_gather2(value: Reg, index: Reg, mode: u8) -> Result<()> {
+        if value.is_xmm() && index.is_xmm() {
+            return Ok(());
+        }
+        let valid = match mode {
+            0 => (value.is_ymm() && index.is_ymm()) || (value.is_zmm() && index.is_zmm()),
+            1 => (value.is_ymm() && index.is_xmm()) || (value.is_zmm() && index.is_ymm()),
+            2 => (value.is_xmm() && index.is_ymm()) || (value.is_ymm() && index.is_zmm()),
+            _ => false,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::BadVsibAddressing)
+        }
+    }
+
+    fn op_gather2(
+        &mut self,
+        value: Reg,
+        addr: Address,
+        type_: TypeFlags,
+        opcode: u8,
+        mode: u8,
+    ) -> Result<()> {
+        if value.has_zero() {
+            return Err(Error::InvalidZero);
+        }
+        let index = *addr.get_reg_exp().get_index();
+        Self::check_gather2(value, index, mode)?;
+
+        let mut mask_idx = value.get_opmask_idx();
+        if type_.contains(TypeFlags::T_M_K) && addr.get_opmask_idx() != 0 {
+            mask_idx = addr.get_opmask_idx();
+        }
+        if mask_idx == 0 {
+            return Err(Error::K0IsInvalid);
+        }
+        if !type_.contains(TypeFlags::T_M_K) && value.get_idx() == index.get_idx() {
+            return Err(Error::SameRegsAreInvalid);
+        }
+        self.buf
+            .op_vex(&value, None, &RegMem::Mem(addr), type_, opcode, None)
+    }
+
+    fn op_gather_fetch(
+        &mut self,
+        addr: Address,
+        extension: u8,
+        type_: TypeFlags,
+        opcode: u8,
+        index_is_ymm: bool,
+    ) -> Result<()> {
+        if addr.has_zero() {
+            return Err(Error::InvalidZero);
+        }
+        let index = *addr.get_reg_exp().get_index();
+        if index_is_ymm != index.is_ymm() || (!index_is_ymm && !index.is_zmm()) {
+            return Err(Error::BadVsibAddressing);
+        }
+        self.buf.op_vex(
+            &Reg::zmm(extension),
+            None,
+            &RegMem::Mem(addr),
+            type_,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vgatherdpd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x92,
+            0,
+        )
+    }
+
+    pub fn vgatherdps_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x92,
+            1,
+        )
+    }
+
+    pub fn vgatherqpd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x93,
+            1,
+        )
+    }
+
+    pub fn vgatherqps_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x93,
+            2,
+        )
+    }
+
+    pub fn vpgatherdd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x90,
+            1,
+        )
+    }
+
+    pub fn vpgatherdq_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x90,
+            0,
+        )
+    }
+
+    pub fn vpgatherqd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x91,
+            2,
+        )
+    }
+
+    pub fn vpgatherqq_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x91,
+            1,
+        )
+    }
+
+    pub fn vgatherdpd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x92,
+            1,
+        )
+    }
+
+    pub fn vgatherdps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x92,
+            0,
+        )
+    }
+
+    pub fn vgatherqpd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x93,
+            0,
+        )
+    }
+
+    pub fn vgatherqps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x93,
+            2,
+        )
+    }
+
+    pub fn vpgatherdd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x90,
+            0,
+        )
+    }
+
+    pub fn vpgatherdq(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x90,
+            1,
+        )
+    }
+
+    pub fn vpgatherqd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x91,
+            2,
+        )
+    }
+
+    pub fn vpgatherqq(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x91,
+            0,
+        )
+    }
+
+    pub fn vpscatterdd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA0,
+            0,
+        )
+    }
+
+    pub fn vpscatterdq(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA0,
+            1,
+        )
+    }
+
+    pub fn vpscatterqd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA1,
+            2,
+        )
+    }
+
+    pub fn vpscatterqq(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA1,
+            0,
+        )
+    }
+
+    pub fn vscatterdpd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA2,
+            1,
+        )
+    }
+
+    pub fn vscatterdps(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA2,
+            0,
+        )
+    }
+
+    pub fn vscatterqpd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA3,
+            0,
+        )
+    }
+
+    pub fn vscatterqps(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA3,
+            2,
+        )
+    }
+
+    pub fn vgatherpf0dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vgatherpf0dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vgatherpf0qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vgatherpf0qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vgatherpf1dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vgatherpf1dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vgatherpf1qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vgatherpf1qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf0dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vscatterpf0dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vscatterpf0qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf0qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf1dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vscatterpf1dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vscatterpf1qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf1qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
     // ─── SSE Instructions ───────────────────────────────────────
 
     /// `addps xmm, xmm/m128`
