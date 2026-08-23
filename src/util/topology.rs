@@ -4,6 +4,137 @@
 /// Reads cache hierarchy and core topology from the OS.
 use std::collections::BTreeSet;
 
+use crate::error::{Error, Result};
+
+const CPU_MASK_LIMIT: u32 = 1 << 10;
+
+/// Ordered set of logical CPU indices.
+///
+/// This is the Rust counterpart of Xbyak's non-compact `CpuMask`
+/// implementation. It preserves the same ordering, range and parsing
+/// contracts without exposing the container as the public API.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CpuMask {
+    indices: BTreeSet<u32>,
+}
+
+impl CpuMask {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        self.indices.clear();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.indices.len()
+    }
+
+    /// Append a monotonically increasing CPU index.
+    pub fn append(&mut self, index: u32) -> Result<()> {
+        if index >= CPU_MASK_LIMIT
+            || self
+                .indices
+                .last()
+                .is_some_and(|previous| *previous >= index)
+        {
+            return Err(Error::InvalidCpumaskIndex);
+        }
+        self.indices.insert(index);
+        Ok(())
+    }
+
+    /// Append every CPU index in the inclusive range `[first, last]`.
+    pub fn append_range(&mut self, first: u32, last: u32) -> Result<()> {
+        if first > last || last >= CPU_MASK_LIMIT {
+            return Err(Error::InvalidCpumaskIndex);
+        }
+        for index in first..=last {
+            self.append(index)?;
+        }
+        Ok(())
+    }
+
+    /// Append indices parsed from `(integer|range)[,(integer|range)]*`.
+    pub fn set_str(&mut self, value: &str) -> Result<()> {
+        if value.is_empty() {
+            return Ok(());
+        }
+        for item in value.split(',') {
+            if item.is_empty() {
+                return Err(Error::InvalidCpumaskIndex);
+            }
+            if let Some((first, last)) = item.split_once('-') {
+                if first.is_empty() || last.is_empty() || last.contains('-') {
+                    return Err(Error::InvalidCpumaskIndex);
+                }
+                let first = first
+                    .parse::<u32>()
+                    .map_err(|_| Error::InvalidCpumaskIndex)?;
+                let last = last
+                    .parse::<u32>()
+                    .map_err(|_| Error::InvalidCpumaskIndex)?;
+                self.append_range(first, last)?;
+            } else {
+                let index = item
+                    .parse::<u32>()
+                    .map_err(|_| Error::InvalidCpumaskIndex)?;
+                self.append(index)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_str(&self) -> String {
+        let mut result = String::new();
+        let mut values = self.indices.iter().copied().peekable();
+        while let Some(first) = values.next() {
+            let mut last = first;
+            while values.peek().is_some_and(|next| *next == last + 1) {
+                last = values.next().unwrap();
+            }
+            if !result.is_empty() {
+                result.push(',');
+            }
+            result.push_str(&first.to_string());
+            if last != first {
+                result.push('-');
+                result.push_str(&last.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn get(&self, index: usize) -> Option<u32> {
+        self.indices.iter().nth(index).copied()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.indices.iter().copied()
+    }
+
+    pub fn put(&self, label: Option<&str>) {
+        if let Some(label) = label {
+            print!("{label}: ");
+        }
+        println!("{}", self.get_str());
+    }
+}
+
+impl<'a> IntoIterator for &'a CpuMask {
+    type Item = u32;
+    type IntoIter = std::iter::Copied<std::collections::btree_set::Iter<'a, u32>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.indices.iter().copied()
+    }
+}
+
 /// Core type for hybrid architectures (Intel Alder Lake+).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreType {
@@ -43,7 +174,7 @@ pub struct CpuCache {
     /// Number of ways of associativity.
     pub associativity: u32,
     /// Set of logical CPU indices sharing this cache.
-    pub shared_cpu_indices: BTreeSet<u32>,
+    pub shared_cpu_indices: CpuMask,
 }
 
 impl CpuCache {
@@ -215,7 +346,9 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
 
             // Read shared CPU list
             if let Ok(s) = fs::read_to_string(format!("{}/shared_cpu_list", cache_base)) {
-                cache.shared_cpu_indices = parse_cpu_list(s.trim());
+                if let Ok(mask) = parse_cpu_list(s.trim()) {
+                    cache.shared_cpu_indices = mask;
+                }
             }
         }
     }
@@ -223,14 +356,14 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
     // Hybrid core types
     if topo.is_hybrid {
         if let Ok(s) = fs::read_to_string("/sys/devices/cpu_core/cpus") {
-            for idx in parse_cpu_list(s.trim()) {
+            for idx in parse_cpu_list(s.trim()).unwrap_or_default().iter() {
                 if (idx as usize) < topo.logical_cpus.len() {
                     topo.logical_cpus[idx as usize].core_type = CoreType::Performance;
                 }
             }
         }
         if let Ok(s) = fs::read_to_string("/sys/devices/cpu_atom/cpus") {
-            for idx in parse_cpu_list(s.trim()) {
+            for idx in parse_cpu_list(s.trim()).unwrap_or_default().iter() {
                 if (idx as usize) < topo.logical_cpus.len() {
                     topo.logical_cpus[idx as usize].core_type = CoreType::Efficient;
                 }
@@ -286,29 +419,15 @@ fn parse_size(s: &str) -> u32 {
 }
 
 /// Parse a CPU list string like "0-3,5,7,10-12" into a set of indices.
-fn parse_cpu_list(s: &str) -> BTreeSet<u32> {
-    let mut set = BTreeSet::new();
-    if s.is_empty() {
-        return set;
-    }
-    for part in s.split(',') {
-        let part = part.trim();
-        if let Some(dash) = part.find('-') {
-            let start: u32 = part[..dash].parse().unwrap_or(0);
-            let end: u32 = part[dash + 1..].parse().unwrap_or(0);
-            for i in start..=end {
-                set.insert(i);
-            }
-        } else if let Ok(v) = part.parse::<u32>() {
-            set.insert(v);
-        }
-    }
-    set
+fn parse_cpu_list(s: &str) -> Result<CpuMask> {
+    let mut mask = CpuMask::new();
+    mask.set_str(s)?;
+    Ok(mask)
 }
 
 /// Count total CPUs from an "online" cpu list string (e.g., "0-7" → 8).
 fn count_from_cpu_list(s: &str) -> u32 {
-    parse_cpu_list(s).len() as u32
+    parse_cpu_list(s).map_or(0, |mask| mask.len() as u32)
 }
 
 #[cfg(test)]
@@ -316,16 +435,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_cpu_mask_upstream_contract() {
+        let mut mask = CpuMask::new();
+        assert!(mask.is_empty());
+        mask.append(1).unwrap();
+        mask.append(3).unwrap();
+        mask.append_range(5, 7).unwrap();
+        assert_eq!(mask.get_str(), "1,3,5-7");
+        assert_eq!(mask.len(), 5);
+        assert_eq!(mask.get(3), Some(6));
+        assert_eq!(mask.get(5), None);
+
+        assert_eq!(mask.append(7).unwrap_err(), Error::InvalidCpumaskIndex);
+        assert_eq!(mask.append(1024).unwrap_err(), Error::InvalidCpumaskIndex);
+        assert_eq!(
+            mask.append_range(9, 8).unwrap_err(),
+            Error::InvalidCpumaskIndex
+        );
+        mask.clear();
+        assert!(mask.is_empty());
+    }
+
+    #[test]
+    fn test_cpu_mask_strict_parser() {
+        for invalid in ["1,", ",1", "2-1", "1--2", "a", "1,1", "1024"] {
+            let mut mask = CpuMask::new();
+            assert_eq!(
+                mask.set_str(invalid).unwrap_err(),
+                Error::InvalidCpumaskIndex,
+                "input={invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn test_parse_cpu_list() {
-        let set = parse_cpu_list("0-3,5,7,10-12");
-        assert_eq!(set, [0, 1, 2, 3, 5, 7, 10, 11, 12].into_iter().collect());
+        let mask = parse_cpu_list("0-3,5,7,10-12").unwrap();
+        assert_eq!(mask.get_str(), "0-3,5,7,10-12");
+        assert_eq!(
+            mask.iter().collect::<Vec<_>>(),
+            [0, 1, 2, 3, 5, 7, 10, 11, 12]
+        );
     }
 
     #[test]
     fn test_parse_cpu_list_single() {
-        let set = parse_cpu_list("0");
-        assert_eq!(set.len(), 1);
-        assert!(set.contains(&0));
+        let mask = parse_cpu_list("0").unwrap();
+        assert_eq!(mask.len(), 1);
+        assert_eq!(mask.get(0), Some(0));
     }
 
     #[test]

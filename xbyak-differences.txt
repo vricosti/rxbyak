@@ -487,3 +487,13 @@ Xbyak exceptions. A native differential probe compared all feature bits
 0-101, family/model fields, topology counts, every data-cache entry, and the
 three version/palette values with Xbyak v7.40; all values matched on the audit
 host. CpuTopology remains a separate structural/platform audit slice.
+
+CpuMask is now an owned topology type rather than a raw BTreeSet field. Its
+monotonic append contract, 0-1023 index range, inclusive ranges, strict list
+parser, iteration and canonical range serialization follow Xbyak. rxbyak uses
+the BTreeSet-backed implementation that upstream itself selects with
+XBYAK_CPUMASK_COMPACT=0 rather than reproducing the default 64-bit packed
+storage; no CpuMask bytes cross an ABI or serialization boundary. Rust Result
+reports the same invalid-index conditions that Xbyak reports by boolean return
+or exception. The platform-specific CpuTopology population remains the next
+slice.
