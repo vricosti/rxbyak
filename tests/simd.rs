@@ -579,3 +579,23 @@ fn test_vex_packed_shift_immediates_support_ymm_and_extended_registers() {
         [0xC4, 0xC1, 0x11, 0x72, 0xD6, 0x08]
     );
 }
+
+#[test]
+fn test_vpsrlq_immediate_matches_xbyak_v740() {
+    assert_eq!(
+        assemble(|a| a.vpsrlq_imm(XMM3, XMM4, 7)),
+        [0xC5, 0xE1, 0x73, 0xD4, 0x07]
+    );
+    assert_eq!(
+        assemble(|a| a.vpsrlq_imm(XMM11, XMM12, 7)),
+        [0xC4, 0xC1, 0x21, 0x73, 0xD4, 0x07]
+    );
+    assert_eq!(
+        assemble(|a| a.vpsrlq_imm(YMM17, YMM18, 31)),
+        [0x62, 0xB1, 0xF5, 0x20, 0x73, 0xD2, 0x1F]
+    );
+    assert_eq!(
+        assemble(|a| a.vpsrlq_imm(ZMM29, ZMM30, 32)),
+        [0x62, 0x91, 0x95, 0x40, 0x73, 0xD6, 0x20]
+    );
+}

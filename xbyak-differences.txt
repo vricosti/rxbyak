@@ -815,3 +815,11 @@ duplicate method names. The immediate overloads now use the explicit
 ZMM, opmask and zeroing bytes were generated with Xbyak v7.40; the original
 three-operand variable-control methods remain covered separately. No
 binary-layout-bearing type changes.
+
+The packed-qword shift follow-up ports Xbyak's immediate-control VPSRLQ
+overload as `vpsrlq_imm`, complementing the existing variable-count
+`vpsrlq` and immediate `vpsllq_imm` entry points. The helper retains Xbyak's
+literal `/2`, `T_66|T_0F|T_EW1|T_YMM|T_EVEX|T_B64|T_MEM_EVEX`, opcode
+`0x73`, and destination-in-VEX.vvvv ownership. Exact XMM, YMM, ZMM and high
+register bytes were generated directly with Xbyak v7.40 and are also checked
+against NASM. No binary-layout-bearing type changes.

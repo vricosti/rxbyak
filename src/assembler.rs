@@ -8053,6 +8053,25 @@ impl CodeAssembler {
         )
     }
 
+    /// `vpsrlq xmm/ymm/zmm, xmm/ymm/zmm, imm8` — VEX/EVEX.66.0F.W1 73 /2 ib
+    #[inline]
+    pub fn vpsrlq_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            2,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_B64
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
     /// `vpsraq xmm/ymm/zmm, xmm/ymm/zmm, imm8` — EVEX.66.0F.W1 72 /4 ib
     #[inline]
     pub fn vpsraq_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
