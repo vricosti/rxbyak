@@ -141,10 +141,14 @@ not_
 or_
 pause
 pop
+pop2
+pop2p
 popcnt
 popf
 popp
 push
+push2
+push2p
 push_imm
 pushp
 rcl

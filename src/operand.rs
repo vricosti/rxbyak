@@ -483,6 +483,13 @@ impl RegMem {
             RegMem::Mem(m) => m.get_bit(),
         }
     }
+
+    pub(crate) fn has_rex2_nf_zu(&self) -> bool {
+        match self {
+            RegMem::Reg(r) => r.has_rex2_nf_zu(),
+            RegMem::Mem(m) => m.has_rex2(),
+        }
+    }
 }
 
 impl From<Reg> for RegMem {

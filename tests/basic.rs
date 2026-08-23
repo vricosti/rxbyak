@@ -228,6 +228,23 @@ fn test_pushp_popp_rex2_ppx_hint() {
 }
 
 #[test]
+fn test_xbyak_7_38_paired_push_pop_instructions() {
+    let code = assemble(|a| {
+        a.push2(RBX, R12)?;
+        a.pop2(R12, RBX)?;
+        a.push2p(R30, R31)?;
+        a.pop2p(R31, R30)
+    });
+    assert_eq!(
+        code,
+        [
+            0x62, 0xD4, 0x64, 0x18, 0xFF, 0xF4, 0x62, 0xF4, 0x1C, 0x18, 0x8F, 0xC3, 0x62, 0xDC,
+            0x8C, 0x10, 0xFF, 0xF7, 0x62, 0xDC, 0x84, 0x10, 0x8F, 0xC6,
+        ]
+    );
+}
+
+#[test]
 fn test_pushp_rejects_non_64_bit_gpr() {
     let mut asm = CodeAssembler::new(4096).unwrap();
     assert_eq!(asm.pushp(EAX), Err(Error::BadCombination));

@@ -532,6 +532,120 @@ impl CodeBuffer {
         Ok(disp8n)
     }
 
+    /// Emit the EVEX-legacy prefix used by APX instructions.
+    ///
+    /// This is the Rust counterpart of Xbyak `evexLeg`.
+    #[inline]
+    pub(crate) fn emit_evex_legacy(
+        &mut self,
+        r: &Reg,
+        b: &Reg,
+        x: &Reg,
+        v: &Reg,
+        type_: TypeFlags,
+        sc: Option<u8>,
+    ) -> Result<()> {
+        let map = match type_.get_map() {
+            0 => 4,
+            map => map,
+        };
+        let r3 = if r.is_ext_idx() { 0 } else { 0x80 };
+        let x3 = if x.is_ext_idx() { 0 } else { 0x40 };
+        let b3 = if b.is_ext_idx() { 0 } else { 0x20 };
+        let r4 = if r.is_ext_idx2() { 0 } else { 0x10 };
+        let b4 = if b.is_ext_idx2() { 0x08 } else { 0 };
+        let w = if type_.contains(TypeFlags::T_W0) {
+            0
+        } else if r.is_bit(64) || v.is_bit(64) || type_.contains(TypeFlags::T_W1) {
+            1
+        } else {
+            0
+        };
+        let vvvv = ((!v.get_idx()) & 15) << 3;
+        let x4 = if x.is_ext_idx2() { 0 } else { 0x04 };
+        let pp = if type_.intersects(TypeFlags::T_F2 | TypeFlags::T_F3 | TypeFlags::T_66) {
+            type_.get_pp()
+        } else if r.is_bit(16) || v.is_bit(16) {
+            1
+        } else {
+            0
+        };
+        let v4 = if v.is_ext_idx2() { 0 } else { 1 };
+        let nd = if type_.contains(TypeFlags::T_ZU) {
+            u8::from(r.get_zu() || b.get_zu())
+        } else if type_.contains(TypeFlags::T_ND1) {
+            1
+        } else if type_.contains(TypeFlags::T_APX) {
+            0
+        } else {
+            u8::from(v.is_reg())
+        };
+        let nf = u8::from(r.get_nf() || b.get_nf() || x.get_nf() || v.get_nf());
+        if !type_.contains(TypeFlags::T_NF) && nf != 0 {
+            return Err(Error::InvalidNf);
+        }
+        if !type_.contains(TypeFlags::T_ZU) && r.get_zu() {
+            return Err(Error::InvalidZu);
+        }
+
+        self.db(0x62)?;
+        self.db(r3 | x3 | b3 | r4 | b4 | map)?;
+        self.db((w << 7) | vvvv | x4 | pp)?;
+        self.db(match sc {
+            Some(sc) => (nd << 4) | sc,
+            None => (nd << 4) | (v4 << 3) | (nf << 2),
+        })
+    }
+
+    /// Encode Xbyak's APX/EVEX-legacy `(r, r, m)` or `(r, m, r)` form.
+    #[inline]
+    pub(crate) fn op_roo(
+        &mut self,
+        d: &Reg,
+        op1: &RegMem,
+        op2: &RegMem,
+        type_: TypeFlags,
+        mut code: u8,
+        imm_size: u8,
+        sc: Option<u8>,
+    ) -> Result<bool> {
+        if !type_.contains(TypeFlags::T_MUST_EVEX)
+            && !d.is_reg()
+            && !d.has_rex2_nf_zu()
+            && !op1.has_rex2_nf_zu()
+            && !op2.has_rex2_nf_zu()
+        {
+            return Ok(false);
+        }
+
+        let mut p1 = *op1;
+        let mut p2 = *op2;
+        if p1.is_mem() {
+            core::mem::swap(&mut p1, &mut p2);
+        } else if p2.is_mem() {
+            code |= 2;
+        }
+        let RegMem::Reg(r) = p1 else {
+            return Err(Error::BadCombination);
+        };
+
+        match p2 {
+            RegMem::Mem(mut addr) => {
+                let exp = addr.get_reg_exp();
+                self.emit_evex_legacy(&r, exp.get_base(), exp.get_index(), d, type_, sc)?;
+                self.write_code(type_, d, code, false)?;
+                addr.imm_size = imm_size;
+                self.emit_addr(&addr, r.get_idx())?;
+            }
+            RegMem::Reg(op2) => {
+                self.emit_evex_legacy(&op2, &r, &Reg::default(), d, type_, sc)?;
+                self.write_code(type_, d, code, false)?;
+                self.set_modrm(3, op2.get_idx(), r.get_idx())?;
+            }
+        }
+        Ok(true)
+    }
+
     /// Encode reg-reg instruction: REX + opcode + ModR/M(mod=3).
     #[inline]
     pub(crate) fn op_rr(&mut self, r1: &Reg, r2: &Reg, type_: TypeFlags, code: u8) -> Result<()> {

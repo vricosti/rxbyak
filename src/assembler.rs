@@ -454,6 +454,53 @@ impl CodeAssembler {
         }
     }
 
+    /// `push2 r64, r64` — APX paired push.
+    #[inline]
+    pub fn push2(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W0, 0xFF, 6)
+    }
+
+    /// `push2p r64, r64` — APX paired push with PPX hint.
+    #[inline]
+    pub fn push2p(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W1, 0xFF, 6)
+    }
+
+    /// `pop2 r64, r64` — APX paired pop.
+    #[inline]
+    pub fn pop2(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W0, 0x8F, 0)
+    }
+
+    /// `pop2p r64, r64` — APX paired pop with PPX hint.
+    #[inline]
+    pub fn pop2p(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W1, 0x8F, 0)
+    }
+
+    fn push_pop2(
+        &mut self,
+        first: Reg,
+        second: Reg,
+        width: TypeFlags,
+        opcode: u8,
+        extension: u8,
+    ) -> Result<()> {
+        if !first.is_reg_bit(64) || !second.is_reg_bit(64) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_roo(
+            &first,
+            &RegMem::Reg(second),
+            &RegMem::Reg(Reg::gpr64(extension)),
+            TypeFlags::T_APX | TypeFlags::T_ND1 | width,
+            opcode,
+            0,
+            None,
+        )?;
+        Ok(())
+    }
+
     /// `pushp r64` — APX push with the PPX hint.
     #[inline]
     pub fn pushp(&mut self, reg: Reg) -> Result<()> {
