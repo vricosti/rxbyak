@@ -389,20 +389,26 @@ Reference checkout:
 
   Xbyak v7.40, commit 1230a6cedabdce6fe0246e5324232451f90ac300
 
-The checked-in tools/audit_xbyak.py script reports the name-level inventory:
+The checked-in tools/audit_xbyak.py script evaluates Xbyak's preprocessor
+surface for rxbyak's supported configuration (XBYAK64, AVX-512 enabled,
+optional omitted-operand overloads disabled) and reports:
 
-  Xbyak unique mnemonic names:                  1895
-  Xbyak mnemonic overloads:                     2714
+  Xbyak active 64-bit mnemonic names:           1879
+  Xbyak active 64-bit mnemonic overloads:        2439
   rxbyak handwritten public instruction methods: 657
   rxbyak generated unique methods:               834
   Xbyak names matched after Rust API mapping:    1379
-  Xbyak names not matched:                        516
+  Xbyak names not matched:                        500
+    compatibility aliases with existing encoder: 178
+    missing encoder/API names:                    322
 
-The 516 unmatched names are an audit queue, not 516 proven missing encoders.
-They include 32-bit-only instructions, Xbyak aliases for an existing immediate
-form, and convenience compare-predicate names. Conversely, a matched name does
-not prove that every Xbyak overload or validation rule is present. Operand-form
-and byte-level parity must therefore still be reviewed family by family.
+The tool excludes the 32-bit-only branch instead of mixing it into the queue.
+It separately identifies direct Xbyak forwarders and known spelling aliases;
+those 178 names still need public Rust wrappers for API parity, but their byte
+encoder already exists. The remaining 322 names require an encoder or public
+API audit. Conversely, a matched name does not prove that every Xbyak overload
+or validation rule is present. Operand-form and byte-level parity must therefore
+still be reviewed family by family.
 
 The original rxbyak import was made while Xbyak v7.33.3 was current. Between
 v7.33.3 and v7.40, upstream added 39 unique mnemonic names and removed eight.

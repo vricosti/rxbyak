@@ -15,6 +15,10 @@ from pathlib import Path
 
 
 UPSTREAM_METHOD = re.compile(r"\bvoid\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+UPSTREAM_FORWARDER = re.compile(
+    r"\bvoid\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^{}]*\)\s*"
+    r"\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\([^{};]*\);\s*\}"
+)
 RUST_METHOD = re.compile(r"^\s*pub fn\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
 GENERATED_METHOD = re.compile(r'Insn::[A-Za-z_]+\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 
@@ -33,6 +37,29 @@ RUST_SUFFIXES = (
     "_m80",
 )
 
+ACTIVE_XBYAK_MACROS = {
+    "XBYAK64": True,
+    "XBYAK_ENABLE_OMITTED_OPERAND": False,
+    "XBYAK_DISABLE_AVX512": False,
+    "XBYAK_NO_OP_NAMES": False,
+}
+
+# These Xbyak spellings emit exactly the same instruction as an rxbyak method
+# that already exists. They remain API-compatibility gaps until wrappers are
+# added, but they are not missing encoder families.
+MANUAL_EQUIVALENT_ALIASES = {
+    "jna": "jbe",
+    "jnae": "jb",
+    "jng": "jle",
+    "jnge": "jl",
+    "jpe": "jp",
+    "jpo": "jnp",
+    "popfq": "popf",
+    "pushfq": "pushf",
+    "sal": "shl",
+    "wait": "fwait",
+}
+
 
 def git_description(path: Path) -> str:
     try:
@@ -47,11 +74,50 @@ def git_description(path: Path) -> str:
         return "unknown revision"
 
 
-def upstream_methods(root: Path) -> tuple[set[str], int]:
+def active_xbyak_text(text: str) -> str:
+    """Evaluate the small preprocessor surface in xbyak_mnemonic.h.
+
+    The audit targets rxbyak's supported 64-bit configuration, with AVX-512
+    enabled and optional omitted-operand overloads disabled.
+    """
+
+    active = True
+    stack: list[tuple[bool, bool]] = []
+    output: list[str] = []
+    for line in text.splitlines():
+        directive = re.match(r"\s*#(ifdef|ifndef)\s+([A-Za-z_][A-Za-z0-9_]*)", line)
+        if directive:
+            kind, macro = directive.groups()
+            value = ACTIVE_XBYAK_MACROS.get(macro, False)
+            condition = value if kind == "ifdef" else not value
+            stack.append((active, condition))
+            active = active and condition
+            continue
+        if re.match(r"\s*#else\b", line):
+            parent, condition = stack[-1]
+            stack[-1] = (parent, not condition)
+            active = parent and not condition
+            continue
+        if re.match(r"\s*#endif\b", line):
+            parent, _ = stack.pop()
+            active = parent
+            continue
+        if active:
+            output.append(line)
+    if stack:
+        raise ValueError("unterminated preprocessor block in xbyak_mnemonic.h")
+    return "\n".join(output)
+
+
+def upstream_methods(root: Path) -> tuple[set[str], int, dict[str, set[str]]]:
     header = root / "xbyak" / "xbyak_mnemonic.h"
-    text = header.read_text(encoding="utf-8")
+    text = active_xbyak_text(header.read_text(encoding="utf-8"))
     forms = UPSTREAM_METHOD.findall(text)
-    return set(forms), len(forms)
+    forwarders: dict[str, set[str]] = {}
+    for source, target in UPSTREAM_FORWARDER.findall(text):
+        if source != target:
+            forwarders.setdefault(source, set()).add(target)
+    return set(forms), len(forms), forwarders
 
 
 def rxbyak_methods(root: Path) -> tuple[set[str], int, int]:
@@ -98,21 +164,38 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    upstream, upstream_form_count = upstream_methods(args.xbyak)
+    upstream, upstream_form_count, forwarders = upstream_methods(args.xbyak)
     rust, handwritten_count, generated_count = rxbyak_methods(args.rxbyak)
-    covered = upstream & upstream_spellings(rust)
-    unmatched = sorted(upstream - covered)
+    rust_spellings = upstream_spellings(rust)
+    covered = upstream & rust_spellings
+    unmatched = upstream - covered
+
+    equivalent_aliases = {
+        name: sorted(target for target in targets if target in rust_spellings)
+        for name, targets in forwarders.items()
+        if name in unmatched and any(target in rust_spellings for target in targets)
+    }
+    for name, target in MANUAL_EQUIVALENT_ALIASES.items():
+        if name in unmatched and target in rust_spellings:
+            equivalent_aliases[name] = [target]
+    missing = sorted(unmatched - equivalent_aliases.keys())
 
     print(f"Xbyak reference: {git_description(args.xbyak)}")
-    print(f"Xbyak unique mnemonic names: {len(upstream)}")
-    print(f"Xbyak mnemonic overloads: {upstream_form_count}")
+    print(f"Xbyak active 64-bit mnemonic names: {len(upstream)}")
+    print(f"Xbyak active 64-bit mnemonic overloads: {upstream_form_count}")
     print(f"rxbyak handwritten public methods: {handwritten_count}")
     print(f"rxbyak generated unique methods: {generated_count}")
     print(f"Xbyak names matched after Rust API mapping: {len(covered)}")
     print(f"Xbyak names not matched: {len(unmatched)}")
+    print(f"  compatibility aliases with an equivalent encoder: {len(equivalent_aliases)}")
+    print(f"  missing encoder/API names: {len(missing)}")
     print()
-    print("Unmatched Xbyak names (includes aliases and 32-bit-only instructions):")
-    for name in unmatched:
+    print("Missing compatibility aliases (Xbyak name -> existing rxbyak encoder):")
+    for name in sorted(equivalent_aliases):
+        print(f"{name} -> {', '.join(equivalent_aliases[name])}")
+    print()
+    print("Missing encoder/API names:")
+    for name in missing:
         print(name)
 
 
