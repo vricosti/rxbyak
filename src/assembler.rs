@@ -1821,6 +1821,145 @@ impl CodeAssembler {
 
     // ─── AVX Instructions (VEX-encoded) ─────────────────────────
 
+    /// `vmovq xmm/m64/r64, xmm/m64/r64`
+    ///
+    /// Supports the five Xbyak overload families while retaining their
+    /// distinct VEX/EVEX opcode selection.
+    #[inline]
+    pub fn vmovq(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMem>) -> Result<()> {
+        let dst = dst.into();
+        let src = src.into();
+        let xmm0 = Reg::xmm(0);
+        match (dst, src) {
+            (RegMem::Reg(dst), RegMem::Mem(src)) if dst.is_xmm() => {
+                let (type_, code) = if dst.get_idx() < 16 {
+                    (TypeFlags::T_0F | TypeFlags::T_F3, 0x7E)
+                } else {
+                    (
+                        TypeFlags::T_0F
+                            | TypeFlags::T_66
+                            | TypeFlags::T_EVEX
+                            | TypeFlags::T_EW1
+                            | TypeFlags::T_N8,
+                        0x6E,
+                    )
+                };
+                self.op_avx_x_x_xm(dst, xmm0, src, type_, code, None)
+            }
+            (RegMem::Mem(dst), RegMem::Reg(src)) if src.is_xmm() => {
+                let code = if src.get_idx() < 16 { 0xD6 } else { 0x7E };
+                self.op_avx_x_x_xm(
+                    src,
+                    xmm0,
+                    dst,
+                    TypeFlags::T_0F
+                        | TypeFlags::T_66
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1
+                        | TypeFlags::T_N8,
+                    code,
+                    None,
+                )
+            }
+            (RegMem::Reg(dst), RegMem::Reg(src)) if dst.is_xmm() && src.is_xmm() => self
+                .op_avx_x_x_xm(
+                    dst,
+                    xmm0,
+                    src,
+                    TypeFlags::T_0F
+                        | TypeFlags::T_F3
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1
+                        | TypeFlags::T_N8,
+                    0x7E,
+                    None,
+                ),
+            (RegMem::Reg(dst), RegMem::Reg(src)) if dst.is_xmm() && src.is_reg_bit(64) => self
+                .op_avx_x_x_xm(
+                    dst,
+                    xmm0,
+                    src,
+                    TypeFlags::T_66
+                        | TypeFlags::T_0F
+                        | TypeFlags::T_W1
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1,
+                    0x6E,
+                    None,
+                ),
+            (RegMem::Reg(dst), RegMem::Reg(src)) if dst.is_reg_bit(64) && src.is_xmm() => self
+                .op_avx_x_x_xm(
+                    src,
+                    xmm0,
+                    dst,
+                    TypeFlags::T_66
+                        | TypeFlags::T_0F
+                        | TypeFlags::T_W1
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1,
+                    0x7E,
+                    None,
+                ),
+            _ => Err(Error::BadCombination),
+        }
+    }
+
+    /// `vcvtsi2sd xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtsi2sd(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_0F | TypeFlags::T_F2 | TypeFlags::T_EVEX,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_ER_R | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x2A,
+        )
+    }
+
+    /// `vcvtsi2ss xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtsi2ss(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_0F | TypeFlags::T_F3 | TypeFlags::T_EVEX | TypeFlags::T_ER_R,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x2A,
+        )
+    }
+
+    /// `vcvtusi2sd xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtusi2sd(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_MUST_EVEX,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_ER_R | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x7B,
+        )
+    }
+
+    /// `vcvtusi2ss xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtusi2ss(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_MUST_EVEX | TypeFlags::T_ER_R,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x7B,
+        )
+    }
+
     /// `vaddps xmm/ymm, xmm/ymm, xmm/ymm/m`
     #[inline]
     pub fn vaddps(&mut self, x1: Reg, x2: Reg, op: impl Into<RegMem>) -> Result<()> {
@@ -3439,15 +3578,39 @@ impl CodeAssembler {
             Some(imm),
         )
     }
-    /// `vpextrw r32, xmm, imm8` — VEX.128.66.0F C5 /r ib
+    /// `vpextrw r16/r32/r64/m16, xmm, imm8`
     #[inline]
-    pub fn vpextrw(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+    pub fn vpextrw(&mut self, dst: impl Into<RegMem>, src: Reg, imm: u8) -> Result<()> {
+        let dst = dst.into();
+        let valid_dst = match dst {
+            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.get_bit(), 16 | 32 | 64),
+            RegMem::Mem(_) => true,
+        };
+        if !valid_dst || !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+
+        // Xbyak uses the compact VEX.66.0F C5 form only when both register
+        // indices fit below 16. EGPR and memory destinations use 0F3A 15.
+        if let RegMem::Reg(reg) = dst {
+            if src.get_idx() < 16 && reg.get_idx() < 16 {
+                return self.buf.op_vex(
+                    &Reg::xmm(reg.get_idx()),
+                    Some(&Reg::xmm(0)),
+                    &RegMem::Reg(src),
+                    TypeFlags::T_66 | TypeFlags::T_0F,
+                    0xC5,
+                    Some(imm),
+                );
+            }
+        }
+
         self.buf.op_vex(
-            &dst,
+            &src,
             None,
-            &RegMem::Reg(src),
-            TypeFlags::T_66 | TypeFlags::T_0F,
-            0xC5,
+            &dst,
+            TypeFlags::T_66 | TypeFlags::T_0F3A | TypeFlags::T_EVEX | TypeFlags::T_N2,
+            0x15,
             Some(imm),
         )
     }
@@ -6627,6 +6790,29 @@ impl CodeAssembler {
             0x3D,
             Some(imm),
         )
+    }
+
+    // Xbyak opCvt3: scalar signed/unsigned integer to scalar float.
+    fn op_cvt3(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: RegMem,
+        type_: TypeFlags,
+        type64: TypeFlags,
+        type32: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        let valid_src = match src {
+            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.get_bit(), 32 | 64),
+            RegMem::Mem(_) => true,
+        };
+        if !dst.is_xmm() || !merge.is_xmm() || !valid_src {
+            return Err(Error::BadSizeOfRegister);
+        }
+        let width_type = if src.get_bit() == 64 { type64 } else { type32 };
+        self.buf
+            .op_vex(&dst, Some(&merge), &src, type_ | width_type, opcode, None)
     }
 
     // Xbyak opCvt1: (x, x/m), (y, x/m256), (z, y/m).

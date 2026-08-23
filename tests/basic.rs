@@ -134,6 +134,46 @@ fn test_xbyak_segment_prefixes() {
 }
 
 #[test]
+fn test_vpextrw_matches_xbyak_7_40_register_egpr_and_memory_forms() {
+    let code = assemble(|a| {
+        a.vpextrw(EAX, XMM1, 0x12)?;
+        a.vpextrw(R16D, XMM2, 0x34)?;
+        a.vpextrw(word_ptr(RAX + 16), XMM3, 0x56)
+    });
+    assert_eq!(
+        code,
+        [
+            0xC5, 0xF9, 0xC5, 0xC1, 0x12, 0x62, 0xFB, 0x7D, 0x08, 0x15, 0xD0, 0x34, 0xC4, 0xE3,
+            0x79, 0x15, 0x58, 0x10, 0x56,
+        ]
+    );
+}
+
+#[test]
+fn test_xbyak_7_39_1_egpr_move_and_conversion_fixes() {
+    let code = assemble(|a| {
+        a.vmovq(XMM1, qword_ptr(RAX + 8))?;
+        a.vmovq(qword_ptr(RAX + 16), XMM2)?;
+        a.vmovq(XMM3, XMM4)?;
+        a.vmovq(XMM5, R16)?;
+        a.vmovq(R17, XMM6)?;
+        a.vcvtsi2sd(XMM1, XMM2, R16)?;
+        a.vcvtsi2ss(XMM3, XMM4, R17D)?;
+        a.vcvtusi2sd(XMM5, XMM6, R18)?;
+        a.vcvtusi2ss(XMM7, XMM8, R19D)
+    });
+    assert_eq!(
+        code,
+        [
+            0xC5, 0xFA, 0x7E, 0x48, 0x08, 0xC5, 0xF9, 0xD6, 0x50, 0x10, 0xC5, 0xFA, 0x7E, 0xDC,
+            0x62, 0xF9, 0xFD, 0x08, 0x6E, 0xE8, 0x62, 0xF9, 0xFD, 0x08, 0x7E, 0xF1, 0x62, 0xF9,
+            0xEF, 0x08, 0x2A, 0xC8, 0x62, 0xF9, 0x5E, 0x08, 0x2A, 0xD9, 0x62, 0xF9, 0xCF, 0x08,
+            0x7B, 0xEA, 0x62, 0xF9, 0x3E, 0x08, 0x7B, 0xFB,
+        ]
+    );
+}
+
+#[test]
 fn test_push_pop_rax() {
     let code = assemble(|a| {
         a.push(RAX)?;

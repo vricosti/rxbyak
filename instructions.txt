@@ -742,6 +742,7 @@ vmovmskps
 vmovntdq
 vmovntpd
 vmovntps
+vmovq
 vmovsd
 vmovshdup
 vmovsldup
@@ -1331,6 +1332,10 @@ vcvtps2bf8
 vcvtps2bf8s
 vcvtps2hf8
 vcvtps2hf8s
+vcvtsi2sd
+vcvtsi2ss
+vcvtusi2sd
+vcvtusi2ss
 vcvtrops2hf8
 vcvtrops2hf8s
 vcvttbf162ibs
