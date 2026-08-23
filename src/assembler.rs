@@ -7843,6 +7843,40 @@ impl CodeAssembler {
     // ACE 1.15 AMX instructions use EVEX with TMM destinations and ZMM
     // sources. The older AMX instructions below continue to use VEX.128.
 
+    /// Xbyak `opAMX`: preserve the MIB expression and select VEX or APX from
+    /// the address register set.
+    fn op_amx(&mut self, tile: Reg, addr: Address, type_: TypeFlags, opcode: u8) -> Result<()> {
+        if !tile.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        let addr = addr.clone_no_optimize();
+        if opcode != 0x49 {
+            let exp = addr.get_reg_exp();
+            if exp.get_base().get_bit() == 0 || exp.get_index().get_bit() == 0 {
+                return Err(Error::NotSupported);
+            }
+        }
+        if self.buf.op_roo(
+            &Reg::default(),
+            &RegMem::Mem(addr),
+            &RegMem::Reg(tile),
+            TypeFlags::T_APX | type_,
+            opcode,
+            0,
+            None,
+        )? {
+            return Ok(());
+        }
+        self.buf.op_vex(
+            &tile,
+            Some(&Reg::tmm(0)),
+            &RegMem::Mem(addr),
+            type_,
+            opcode,
+            None,
+        )
+    }
+
     /// `tilemovcol tmm, zmm, r32`
     pub fn tilemovcol_reg(&mut self, dst: Reg, src: Reg, column: Reg) -> Result<()> {
         if !dst.is_tmm() || !src.is_zmm() || !column.is_reg_bit(32) {
@@ -7870,6 +7904,129 @@ impl CodeAssembler {
             TypeFlags::T_66 | TypeFlags::T_0F3A | TypeFlags::T_EW1 | TypeFlags::T_MUST_EVEX,
             0x2F,
             Some(column),
+        )
+    }
+
+    fn tcvtrow_reg(
+        &mut self,
+        dst: Reg,
+        tile: Reg,
+        row: Reg,
+        prefix: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_zmm() || !tile.is_tmm() || !row.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&row),
+            &RegMem::Reg(tile),
+            prefix | TypeFlags::T_0F38 | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            None,
+        )
+    }
+
+    fn tcvtrow_imm(
+        &mut self,
+        dst: Reg,
+        tile: Reg,
+        row: u8,
+        prefix: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_zmm() || !tile.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(tile),
+            prefix | TypeFlags::T_0F3A | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            Some(row),
+        )
+    }
+
+    pub fn tcvtrowd2ps(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_F3, 0x4A)
+    }
+
+    pub fn tcvtrowd2ps_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F3, 0x07)
+    }
+
+    pub fn tcvtrowps2bf16h(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_F2, 0x6D)
+    }
+
+    pub fn tcvtrowps2bf16h_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F2, 0x07)
+    }
+
+    pub fn tcvtrowps2bf16l(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_F3, 0x6D)
+    }
+
+    pub fn tcvtrowps2bf16l_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F3, 0x77)
+    }
+
+    pub fn tcvtrowps2phh(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::NONE, 0x6D)
+    }
+
+    pub fn tcvtrowps2phh_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::NONE, 0x07)
+    }
+
+    pub fn tcvtrowps2phl(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_66, 0x6D)
+    }
+
+    pub fn tcvtrowps2phl_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F2, 0x77)
+    }
+
+    /// Xbyak's register-index TILEMOVROW overloads in both directions.
+    pub fn tilemovrow(&mut self, dst: Reg, src: Reg, row: Reg) -> Result<()> {
+        if !row.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        let width = if dst.is_tmm() && src.is_zmm() {
+            TypeFlags::T_EW1
+        } else if dst.is_zmm() && src.is_tmm() {
+            TypeFlags::T_W0
+        } else {
+            return Err(Error::BadCombination);
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&row),
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F38 | width | TypeFlags::T_MUST_EVEX,
+            0x4A,
+            None,
+        )
+    }
+
+    /// Xbyak's immediate-index TILEMOVROW overloads in both directions.
+    pub fn tilemovrow_imm(&mut self, dst: Reg, src: Reg, row: u8) -> Result<()> {
+        let width = if dst.is_tmm() && src.is_zmm() {
+            TypeFlags::T_EW1
+        } else if dst.is_zmm() && src.is_tmm() {
+            TypeFlags::T_W0
+        } else {
+            return Err(Error::BadCombination);
+        };
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F3A | width | TypeFlags::T_MUST_EVEX,
+            0x07,
+            Some(row),
         )
     }
 
@@ -7985,6 +8142,9 @@ impl CodeAssembler {
         type_: TypeFlags,
         code: u8,
     ) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_tmm() || !src2.is_tmm() {
+            return Err(Error::BadCombination);
+        }
         self.buf.op_vex(
             &dst,
             Some(&src2),
@@ -8026,68 +8186,127 @@ impl CodeAssembler {
         self.amx_tdp(dst, src1, src2, TypeFlags::T_F2, 0x5C)
     }
 
+    fn amx_tdp_map5(&mut self, dst: Reg, src1: Reg, src2: Reg, prefix: TypeFlags) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_tmm() || !src2.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&src2),
+            &RegMem::Reg(src1),
+            prefix | TypeFlags::T_MAP5 | TypeFlags::T_W0,
+            0xFD,
+            None,
+        )
+    }
+
+    /// `tdpbf8ps tmm, tmm, tmm`.
+    pub fn tdpbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::NONE)
+    }
+
+    /// `tdpbhf8ps tmm, tmm, tmm`.
+    pub fn tdpbhf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::T_F2)
+    }
+
+    /// `tdphbf8ps tmm, tmm, tmm`.
+    pub fn tdphbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::T_F3)
+    }
+
+    /// `tdphf8ps tmm, tmm, tmm`.
+    pub fn tdphf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::T_66)
+    }
+
+    fn amx_tcmm(&mut self, dst: Reg, src1: Reg, src2: Reg, prefix: TypeFlags) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_tmm() || !src2.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&src2),
+            &RegMem::Reg(src1),
+            prefix | TypeFlags::T_0F38 | TypeFlags::T_W0,
+            0x6C,
+            None,
+        )
+    }
+
+    pub fn tcmmimfp16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tcmm(dst, src1, src2, TypeFlags::T_66)
+    }
+
+    pub fn tcmmrlfp16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tcmm(dst, src1, src2, TypeFlags::NONE)
+    }
+
     /// `tileloadd tmm, [base + index*stride]` — VEX.128.F2.0F38.W0 4B /r
     /// Uses SIB-like addressing with base and index*stride.
     #[inline]
     pub fn tileloadd(&mut self, dst: Reg, addr: Address) -> Result<()> {
-        self.buf.op_vex(
-            &dst,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            dst,
+            addr,
             TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x4B,
-            None,
         )
     }
     /// `tileloaddt1 tmm, [base + index*stride]` — VEX.128.66.0F38.W0 4B /r
     #[inline]
     pub fn tileloaddt1(&mut self, dst: Reg, addr: Address) -> Result<()> {
-        self.buf.op_vex(
-            &dst,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            dst,
+            addr,
             TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x4B,
-            None,
+        )
+    }
+
+    /// `tileloaddrs tmm, [base + index*stride]`.
+    pub fn tileloaddrs(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_amx(
+            dst,
+            addr,
+            TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W0,
+            0x4A,
+        )
+    }
+
+    /// `tileloaddrst1 tmm, [base + index*stride]`.
+    pub fn tileloaddrst1(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_amx(
+            dst,
+            addr,
+            TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_W0,
+            0x4A,
         )
     }
     /// `tilestored [base + index*stride], tmm` — VEX.128.F3.0F38.W0 4B /r
     #[inline]
     pub fn tilestored(&mut self, addr: Address, src: Reg) -> Result<()> {
-        self.buf.op_vex(
-            &src,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            src,
+            addr,
             TypeFlags::T_F3 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x4B,
-            None,
         )
     }
 
     /// `ldtilecfg [m512]` — VEX.128.NP.0F38.W0 49 /0
     #[inline]
     pub fn ldtilecfg(&mut self, addr: Address) -> Result<()> {
-        let r = Reg::new(0, crate::operand::Kind::Reg, 32);
-        self.buf.op_vex(
-            &r,
-            None,
-            &RegMem::Mem(addr),
-            TypeFlags::T_0F38 | TypeFlags::T_W0,
-            0x49,
-            None,
-        )
+        self.op_amx(Reg::tmm(0), addr, TypeFlags::T_0F38 | TypeFlags::T_W0, 0x49)
     }
     /// `sttilecfg [m512]` — VEX.128.66.0F38.W0 49 /0
     #[inline]
     pub fn sttilecfg(&mut self, addr: Address) -> Result<()> {
-        let r = Reg::new(0, crate::operand::Kind::Reg, 32);
-        self.buf.op_vex(
-            &r,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            Reg::tmm(0),
+            addr,
             TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x49,
-            None,
         )
     }
 
