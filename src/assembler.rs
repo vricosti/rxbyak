@@ -296,6 +296,70 @@ impl CodeAssembler {
         Ok(())
     }
 
+    /// Emit an instruction whose only form is an 8-bit relative label branch.
+    /// This is the short-only path of Xbyak `opJmp` used by LOOP/JECXZ.
+    fn short_label_jump(&mut self, label: &Label, opcode: u8) -> Result<()> {
+        self.buf.db(opcode)?;
+        if let Some(offset) = self.label_mgr.get_offset(label) {
+            let displacement = offset as i64 - self.buf.size() as i64 - 1;
+            if !(-128..=127).contains(&displacement) {
+                return Err(Error::LabelIsTooFar);
+            }
+            self.buf.db(displacement as u8)
+        } else {
+            self.buf.db(0)?;
+            self.label_mgr.add_undef(
+                label.id(),
+                JmpLabel {
+                    end_of_jmp: self.buf.size(),
+                    jmp_size: 1,
+                    mode: LabelMode::AsIs,
+                    disp: 0,
+                },
+            );
+            Ok(())
+        }
+    }
+
+    /// Xbyak `opInOut(const Reg&, const Reg&, uint8_t)`.
+    fn op_in_out_reg(&mut self, accumulator: Reg, port: Reg, code: u8) -> Result<()> {
+        if accumulator.get_idx() == 0 && port.get_idx() == 2 && port.is_bit(16) {
+            return match accumulator.get_bit() {
+                8 => self.buf.db(code),
+                16 => {
+                    self.buf.db(0x66)?;
+                    self.buf.db(code + 1)
+                }
+                32 => self.buf.db(code + 1),
+                _ => Err(Error::BadCombination),
+            };
+        }
+        Err(Error::BadCombination)
+    }
+
+    /// Xbyak `opInOut(const Reg&, uint8_t, uint8_t)`.
+    fn op_in_out_imm(&mut self, accumulator: Reg, code: u8, port: u8) -> Result<()> {
+        if accumulator.get_idx() == 0 {
+            return match accumulator.get_bit() {
+                8 => {
+                    self.buf.db(code)?;
+                    self.buf.db(port)
+                }
+                16 => {
+                    self.buf.db(0x66)?;
+                    self.buf.db(code + 1)?;
+                    self.buf.db(port)
+                }
+                32 => {
+                    self.buf.db(code + 1)?;
+                    self.buf.db(port)
+                }
+                _ => Err(Error::BadCombination),
+            };
+        }
+        Err(Error::BadCombination)
+    }
+
     /// Get immediate bit size for arithmetic operations.
     fn get_imm_bit(reg_bit: u16, imm: i64) -> u8 {
         if reg_bit == 8 {
@@ -380,7 +444,26 @@ impl CodeAssembler {
     /// `ret imm16` — Return and pop imm16 bytes from stack.
     #[inline]
     pub fn ret_imm(&mut self, imm: u16) -> Result<()> {
+        if imm == 0 {
+            return self.ret();
+        }
         self.buf.db(0xC2)?;
+        self.buf.dw(imm)
+    }
+
+    /// `retf` — Far return.
+    #[inline]
+    pub fn retf(&mut self) -> Result<()> {
+        self.buf.db(0xCB)
+    }
+
+    /// `retf imm16` — Far return and pop imm16 bytes from the stack.
+    #[inline]
+    pub fn retf_imm(&mut self, imm: u16) -> Result<()> {
+        if imm == 0 {
+            return self.retf();
+        }
+        self.buf.db(0xCA)?;
         self.buf.dw(imm)
     }
 
@@ -889,6 +972,46 @@ impl CodeAssembler {
         }
     }
 
+    /// `jmpabs imm64` — APX absolute jump encoding.
+    #[inline]
+    pub fn jmpabs(&mut self, address: u64) -> Result<()> {
+        self.buf.db(0xD5)?;
+        self.buf.db(0x00)?;
+        self.buf.db(0xA1)?;
+        self.buf.dq(address)
+    }
+
+    /// `jecxz label` — Address-size override plus short-only branch.
+    #[inline]
+    pub fn jecxz(&mut self, label: &Label) -> Result<()> {
+        self.buf.db(0x67)?;
+        self.short_label_jump(label, 0xE3)
+    }
+
+    /// `jrcxz label` — Short-only branch.
+    #[inline]
+    pub fn jrcxz(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE3)
+    }
+
+    /// `loop label` — Short-only branch.
+    #[inline]
+    pub fn loop_(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE2)
+    }
+
+    /// `loope label` — Short-only branch.
+    #[inline]
+    pub fn loope(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE1)
+    }
+
+    /// `loopne label` — Short-only branch.
+    #[inline]
+    pub fn loopne(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE0)
+    }
+
     /// `jmp reg` — Jump to address in register.
     #[inline]
     pub fn jmp_reg(&mut self, op: impl Into<RegMem>) -> Result<()> {
@@ -1069,6 +1192,71 @@ impl CodeAssembler {
     #[inline]
     pub fn int3(&mut self) -> Result<()> {
         self.buf.db(0xCC)
+    }
+
+    /// `int imm8` — Software interrupt.
+    #[inline]
+    pub fn int_(&mut self, vector: u8) -> Result<()> {
+        self.buf.db(0xCD)?;
+        self.buf.db(vector)
+    }
+
+    /// `in accumulator, dx`.
+    #[inline]
+    pub fn in_(&mut self, accumulator: Reg, port: Reg) -> Result<()> {
+        self.op_in_out_reg(accumulator, port, 0xEC)
+    }
+
+    /// `in accumulator, imm8`.
+    #[inline]
+    pub fn in_imm(&mut self, accumulator: Reg, port: u8) -> Result<()> {
+        self.op_in_out_imm(accumulator, 0xE4, port)
+    }
+
+    /// `out dx, accumulator`.
+    #[inline]
+    pub fn out_(&mut self, port: Reg, accumulator: Reg) -> Result<()> {
+        self.op_in_out_reg(accumulator, port, 0xEE)
+    }
+
+    /// `out imm8, accumulator`.
+    #[inline]
+    pub fn out_imm(&mut self, port: u8, accumulator: Reg) -> Result<()> {
+        self.op_in_out_imm(accumulator, 0xE6, port)
+    }
+
+    #[inline]
+    pub fn outsb(&mut self) -> Result<()> {
+        self.buf.db(0x6E)
+    }
+
+    #[inline]
+    pub fn outsd(&mut self) -> Result<()> {
+        self.buf.db(0x6F)
+    }
+
+    #[inline]
+    pub fn outsw(&mut self) -> Result<()> {
+        self.buf.db(0x66)?;
+        self.buf.db(0x6F)
+    }
+
+    /// `lfs reg, [mem]`.
+    #[inline]
+    pub fn lfs(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_load_seg(&addr, &reg, TypeFlags::T_0F, 0xB4)
+    }
+
+    /// `lgs reg, [mem]`.
+    #[inline]
+    pub fn lgs(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_load_seg(&addr, &reg, TypeFlags::T_0F, 0xB5)
+    }
+
+    /// `lss reg, [mem]`.
+    #[inline]
+    pub fn lss(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_load_seg(&addr, &reg, TypeFlags::T_0F, 0xB2)
     }
 
     /// `xchg op1, op2` — Exchange values. At most one operand may be memory.

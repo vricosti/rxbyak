@@ -161,6 +161,7 @@ def upstream_spellings(methods: set[str]) -> set[str]:
 
     for rust_name, xbyak_names in {
         "and_": ("and", "and_"),
+        "loop_": ("loop",),
         "not_": ("not", "not_"),
         "or_": ("or", "or_"),
         "std_": ("std",),

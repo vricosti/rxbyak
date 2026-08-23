@@ -677,6 +677,32 @@ impl CodeBuffer {
         self.emit_addr(addr, r.get_idx())
     }
 
+    /// Encode the memory form of LFS/LGS/LSS.
+    ///
+    /// This mirrors Xbyak `opLoadSeg`; unlike `op_mr`, the opcode is written
+    /// literally after the optional 0F map byte.
+    #[inline]
+    pub(crate) fn op_load_seg(
+        &mut self,
+        addr: &Address,
+        reg: &Reg,
+        type_: TypeFlags,
+        code: u8,
+    ) -> Result<()> {
+        if reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if addr.is_64bit_disp() {
+            return Err(Error::CantUse64BitDisp);
+        }
+        let _rex2 = self.emit_rex_for_reg_mem(reg, addr, type_)?;
+        if type_.contains(TypeFlags::T_0F) {
+            self.db(0x0F)?;
+        }
+        self.db(code)?;
+        self.emit_addr(addr, reg.get_idx())
+    }
+
     /// Encode reg + (reg or mem) instruction with extension field.
     #[inline]
     pub(crate) fn op_rext(

@@ -395,18 +395,18 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 710
+  rxbyak handwritten public instruction methods: 729
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1595
-  Xbyak names not matched:                        284
+  Xbyak names matched after Rust API mapping:    1611
+  Xbyak names not matched:                        268
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    284
+    missing encoder/API names:                    268
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
 All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
 names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
-and POPFQ. The remaining 284 names require an encoder or public API audit.
+and POPFQ. The remaining 268 names require an encoder or public API audit.
 Conversely, a matched name does not prove that every Xbyak overload or
 validation rule is present. Operand-form and byte-level parity must therefore
 still be reviewed family by family.
@@ -558,3 +558,21 @@ well. The p66 condition now follows xbyak.h::rex literally; MOVRS AX is the
 focused regression. CLFLUSH and CLFLUSHOPT also carry Xbyak's
 T_ALLOW_DIFF_SIZE flag again. No binary-layout-bearing type changes in this
 slice.
+
+The legacy-control slice ports IN/OUT and string OUTS, INT, RETF, LFS/LGS/LSS,
+LOOP/LOOPE/LOOPNE, JECXZ/JRCXZ, and APX JMPABS. `op_load_seg`, the port-I/O
+validation helpers, and the short-only label path remain in assembler/encoder
+ownership corresponding to xbyak.h rather than a generic instruction table.
+Rust represents C++ overloads as `in_`/`in_imm`, `out_`/`out_imm`, and
+`retf`/`retf_imm`; `loop_` escapes the Rust keyword. Existing Label handles are
+used instead of duplicating Xbyak's string-label overloads. Forward and
+backward branches, too-far binding, all legal accumulator widths, invalid port
+registers, low/extended/EGPR segment loads, and immediate byte order match
+Xbyak v7.40 differential output.
+
+The same re-read found that `ret_imm(0)` did not honor Xbyak's `if (imm)`
+selection and emitted C2 0000 rather than C3. Both RET and RETF immediate Rust
+entry points now select the no-immediate opcode for zero exactly as upstream.
+NASM intentionally encodes the textual `ret 0` as C2 0000, so that one case is
+covered by the Xbyak-specific regression rather than the NASM comparison set.
+No binary-layout-bearing type changes in this slice.
