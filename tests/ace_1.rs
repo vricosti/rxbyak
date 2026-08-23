@@ -165,3 +165,25 @@ fn test_remaining_ace_instructions_match_xbyak_7_40() {
         ]
     );
 }
+
+#[test]
+fn test_xbyak_7_35_4_fp8_disp8_scaling() {
+    let code = assemble(|a| {
+        a.vcvt2ph2bf8(XMM1, XMM2, xmmword_ptr(RAX + 64))?;
+        a.vcvt2ph2bf8s(YMM3, YMM4, ymmword_ptr(RAX + 64))?;
+        a.vcvt2ph2hf8(ZMM5, ZMM6, zmmword_ptr(RAX + 64))?;
+        a.vcvt2ph2hf8s(XMM7, XMM8, xmmword_ptr(RAX + 64))?;
+        a.vcvthf82ph(XMM9, xmmword_ptr(RAX + 64))?;
+        a.vcvthf82ph(YMM10, xmmword_ptr(RAX + 64))?;
+        a.vcvthf82ph(ZMM11, ymmword_ptr(RAX + 64))
+    });
+    assert_eq!(
+        code,
+        [
+            0x62, 0xF2, 0x6F, 0x08, 0x74, 0x48, 0x04, 0x62, 0xF5, 0x5F, 0x28, 0x74, 0x58, 0x02,
+            0x62, 0xF5, 0x4F, 0x48, 0x18, 0x68, 0x01, 0x62, 0xF5, 0x3F, 0x08, 0x1B, 0x78, 0x04,
+            0x62, 0x75, 0x7F, 0x08, 0x1E, 0x48, 0x08, 0x62, 0x75, 0x7F, 0x28, 0x1E, 0x50, 0x04,
+            0x62, 0x75, 0x7F, 0x48, 0x1E, 0x58, 0x02,
+        ]
+    );
+}

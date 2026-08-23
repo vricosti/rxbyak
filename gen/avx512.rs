@@ -822,22 +822,22 @@ pub static AVX512_X_X_XM: &[Insn] = &[
     // 2ph conversions (3-op)
     Insn::avx(
         "vcvt2ph2bf8",
-        T_MUST_EVEX | T_66 | T_MAP5 | T_W0 | T_YMM | T_B16,
+        T_N16 | T_N_VL | T_F2 | T_0F38 | T_W0 | T_YMM | T_MUST_EVEX | T_B16,
         0x74,
     ),
     Insn::avx(
         "vcvt2ph2bf8s",
-        T_MUST_EVEX | T_66 | T_MAP5 | T_W0 | T_YMM | T_B16,
+        T_N16 | T_N_VL | T_F2 | T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_B16,
         0x74,
     ),
     Insn::avx(
         "vcvt2ph2hf8",
-        T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16,
+        T_N16 | T_N_VL | T_F2 | T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_B16,
         0x18,
     ),
     Insn::avx(
         "vcvt2ph2hf8s",
-        T_MUST_EVEX | T_MAP5 | T_W0 | T_YMM | T_B16,
+        T_N16 | T_N_VL | T_F2 | T_MAP5 | T_W0 | T_YMM | T_MUST_EVEX | T_B16,
         0x1B,
     ),
     Insn::avx(
@@ -1380,7 +1380,7 @@ pub static AVX512_X_XM: &[Insn] = &[
     ),
     Insn::vex_xm(
         "vcvthf82ph",
-        T_MUST_EVEX | T_F2 | T_MAP5 | T_W0 | T_YMM | T_N1,
+        T_MUST_EVEX | T_F2 | T_MAP5 | T_W0 | T_YMM | T_N8 | T_N_VL,
         0x1E,
     ),
     Insn::vex_xm(

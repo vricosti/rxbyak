@@ -114,6 +114,15 @@ fn test_zeroing_without_mask() {
     assert!(result.is_ok(), "zeroing without mask is silently ignored");
 }
 
+#[test]
+fn test_zeroing_is_rejected_for_memory_destination() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(
+        asm.vpmovssdb(dword_ptr(RAX.into()), ZMM2.k(1).z()),
+        Err(Error::InvalidZero)
+    );
+}
+
 // ─── Label errors ───────────────────────────────────────────────
 
 #[test]

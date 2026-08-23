@@ -660,6 +660,13 @@ impl CodeBuffer {
     ) -> Result<()> {
         match op2 {
             RegMem::Mem(addr) => {
+                // Xbyak 7.37.6: zeroing has no meaning when the architectural
+                // destination is memory. T_M_K marks those reversed forms.
+                if type_.contains(TypeFlags::T_M_K)
+                    && (r.has_zero() || p1.is_some_and(Reg::has_zero))
+                {
+                    return Err(Error::InvalidZero);
+                }
                 let mut addr = *addr;
                 let exp = addr.get_reg_exp();
                 let base = *exp.get_base();
