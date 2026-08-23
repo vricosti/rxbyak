@@ -3478,6 +3478,213 @@ impl CodeAssembler {
         )
     }
 
+    fn vcvt_signed_scalar_to_int(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        prefix: TypeFlags,
+        tuple: TypeFlags,
+        control: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_reg() || !matches!(dst.get_bit(), 32 | 64) {
+            return Err(Error::BadCombination);
+        }
+        let width = if dst.is_bit(64) {
+            TypeFlags::T_W1 | TypeFlags::T_EW1
+        } else {
+            TypeFlags::T_W0
+        };
+        self.op_avx_x_x_xm(
+            Reg::xmm(dst.get_idx()),
+            Reg::xmm(0),
+            src,
+            prefix | TypeFlags::T_0F | width | TypeFlags::T_EVEX | tuple | control,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vcvtsd2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F2,
+            TypeFlags::T_N4,
+            TypeFlags::T_ER_X,
+            0x2D,
+        )
+    }
+
+    pub fn vcvtss2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F3,
+            TypeFlags::T_N8,
+            TypeFlags::T_ER_X,
+            0x2D,
+        )
+    }
+
+    pub fn vcvttsd2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F2,
+            TypeFlags::T_N4,
+            TypeFlags::T_SAE_X,
+            0x2C,
+        )
+    }
+
+    pub fn vcvttss2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F3,
+            TypeFlags::T_N8,
+            TypeFlags::T_SAE_X,
+            0x2C,
+        )
+    }
+
+    fn vcvt_evex_scalar_to_int(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        type_: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_reg() || !matches!(dst.get_bit(), 32 | 64) {
+            return Err(Error::BadCombination);
+        }
+        let width = if dst.is_bit(64) {
+            TypeFlags::T_EW1
+        } else {
+            TypeFlags::T_W0
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&Reg::xmm(0)),
+            &src.into(),
+            type_ | width | TypeFlags::T_MUST_EVEX,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vcvtsd2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N8 | TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_ER_X,
+            0x79,
+        )
+    }
+
+    pub fn vcvtss2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N4 | TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ER_X,
+            0x79,
+        )
+    }
+
+    pub fn vcvttsd2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N8 | TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_SAE_X,
+            0x78,
+        )
+    }
+
+    pub fn vcvttss2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N4 | TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_SAE_X,
+            0x78,
+        )
+    }
+
+    pub fn vcvtsh2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_ER_X,
+            0x2D,
+        )
+    }
+
+    pub fn vcvtsh2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_ER_X,
+            0x79,
+        )
+    }
+
+    pub fn vcvttsh2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_SAE_X,
+            0x2C,
+        )
+    }
+
+    pub fn vcvttsh2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_SAE_X,
+            0x78,
+        )
+    }
+
+    fn vcvt_int_to_scalar_half(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        opcode: u8,
+    ) -> Result<()> {
+        let src = src.into();
+        if !dst.is_xmm() || !merge.is_xmm() || !matches!(src.get_bit(), 32 | 64) {
+            return Err(Error::BadCombination);
+        }
+        let width = if src.get_bit() == 32 {
+            TypeFlags::T_W0 | TypeFlags::T_N4
+        } else {
+            TypeFlags::T_EW1 | TypeFlags::T_N8
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&merge),
+            &src,
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_ER_R
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | width,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vcvtsi2sh(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_int_to_scalar_half(dst, merge, src, 0x2A)
+    }
+
+    pub fn vcvtusi2sh(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_int_to_scalar_half(dst, merge, src, 0x7B)
+    }
+
     /// `vaddps xmm/ymm, xmm/ymm, xmm/ymm/m`
     #[inline]
     pub fn vaddps(&mut self, x1: Reg, x2: Reg, op: impl Into<RegMem>) -> Result<()> {

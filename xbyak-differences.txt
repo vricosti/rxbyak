@@ -409,12 +409,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 875
+  rxbyak handwritten public instruction methods: 889
   rxbyak generated/macro unique methods:         1162
-  Xbyak names matched after Rust API mapping:    1827
-  Xbyak names not matched:                         52
+  Xbyak names matched after Rust API mapping:    1841
+  Xbyak names not matched:                         38
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                     52
+    missing encoder/API names:                     38
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -760,3 +760,16 @@ The VSHUF* wrappers retain Xbyak's Ymm parameter boundary, accepting YMM/ZMM
 but rejecting XMM before the common AVX encoder. Exact Xbyak v7.40 bytes cover
 all ten new names, all three vector widths where relevant, high registers and
 both W/element-size families. No binary-layout-bearing type changes.
+
+The scalar conversion slice ports signed and unsigned VCVT/VCVTT SD/SS-to-SI,
+all SH-to-SI/USI variants, and signed/unsigned integer-to-SH conversion. The
+signed SD/SS helpers deliberately synthesize `Xmm(dst.getIdx())` before
+calling the AVX helper, matching Xbyak's encoding ownership and its treatment
+of extended GPR indices. Unsigned and half-input conversions keep the actual
+GPR as EVEX ModRM.reg, exactly as their upstream `opVex` bodies do.
+
+The integer-to-half helper preserves Xbyak's explicit 32/64-bit source-size
+validation, W/tuple choice, `T_M_K` placement and XMM-only merge operands.
+Exact-byte regressions generated with Xbyak v7.40 cover every mnemonic, 32-
+and 64-bit destinations/sources and EGPR encodings; unsized memory rejection
+is retained as a focused validation test. No binary-layout-bearing changes.
