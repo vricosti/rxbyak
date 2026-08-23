@@ -2481,6 +2481,50 @@ impl CodeAssembler {
         self.vmovrs(dst, addr, TypeFlags::T_F2 | TypeFlags::T_EW1)
     }
 
+    fn avx_ne_convert(
+        &mut self,
+        dst: Reg,
+        addr: Address,
+        type_: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Mem(addr),
+            type_ | TypeFlags::T_0F38 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vbcstnebf162ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_F3 | TypeFlags::T_B16, 0xB1)
+    }
+
+    pub fn vbcstnesh2ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_66 | TypeFlags::T_B16, 0xB1)
+    }
+
+    pub fn vcvtneebf162ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_F3, 0xB0)
+    }
+
+    pub fn vcvtneeph2ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_66, 0xB0)
+    }
+
+    pub fn vcvtneobf162ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_F2, 0xB0)
+    }
+
+    pub fn vcvtneoph2ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::NONE, 0xB0)
+    }
+
     // ─── SSE Instructions ───────────────────────────────────────
 
     /// `addps xmm, xmm/m128`

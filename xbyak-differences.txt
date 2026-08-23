@@ -409,12 +409,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 889
+  rxbyak handwritten public instruction methods: 895
   rxbyak generated/macro unique methods:         1162
-  Xbyak names matched after Rust API mapping:    1841
-  Xbyak names not matched:                         38
+  Xbyak names matched after Rust API mapping:    1847
+  Xbyak names not matched:                         32
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                     38
+    missing encoder/API names:                     32
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -773,3 +773,14 @@ validation, W/tuple choice, `T_M_K` placement and XMM-only merge operands.
 Exact-byte regressions generated with Xbyak v7.40 cover every mnemonic, 32-
 and 64-bit destinations/sources and EGPR encodings; unsized memory rejection
 is retained as a focused validation test. No binary-layout-bearing changes.
+
+The AVX_NE_CONVERT slice ports VBCSTNEBF162PS/VBCSTNESH2PS and all four
+even/odd BF16/FP16-to-PS conversions. Their shared helper contains only the
+literal upstream common map, W and vector-width flags; each public method
+retains its own prefix, opcode and broadcast capability. These instructions
+do not opt into EVEX upstream, so XMM16-XMM31 continue to fail with
+EvexIsInvalid rather than silently selecting another encoding.
+
+Exact Xbyak v7.40 bytes cover all six names with XMM/YMM and extended legacy
+registers, and a focused high-register test preserves the non-EVEX limit. No
+binary-layout-bearing type changes.
