@@ -18,6 +18,7 @@ pub enum Kind {
     Opmask = 1 << 7,
     BndReg = 1 << 8,
     Tmm = 1 << 9,
+    Bsr = 1 << 10,
 }
 
 /// Rounding modes for EVEX encoding.
@@ -61,7 +62,7 @@ impl Segment {
 /// A register operand. Flat struct replacing the C++ class hierarchy.
 ///
 /// Encodes: GPR (8/16/32/64-bit), MMX, XMM, YMM, ZMM, Opmask (k0-k7),
-/// FPU (st0-st7), BndReg (bnd0-bnd3), TMM (tmm0-tmm7).
+/// FPU (st0-st7), BndReg (bnd0-bnd3), TMM (tmm0-tmm7), and BSR0.
 #[derive(Clone, Copy, Debug)]
 pub struct Reg {
     /// Register index (0..31). Bit 5 set for ext8bit (spl/bpl/sil/dil).
@@ -156,6 +157,9 @@ impl Reg {
     pub const fn tmm(idx: u8) -> Self {
         Self::new(idx, Kind::Tmm, 8192)
     }
+    pub const fn bsr() -> Self {
+        Self::new(0, Kind::Bsr, 1024)
+    }
 
     // Accessors
 
@@ -224,6 +228,9 @@ impl Reg {
     }
     pub fn is_tmm(&self) -> bool {
         self.kind as u16 & Kind::Tmm as u16 != 0
+    }
+    pub fn is_bsr(&self) -> bool {
+        self.kind as u16 & Kind::Bsr as u16 != 0
     }
     pub fn is_opmask(&self) -> bool {
         self.kind as u16 & Kind::Opmask as u16 != 0

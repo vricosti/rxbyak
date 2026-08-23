@@ -393,10 +393,10 @@ The checked-in tools/audit_xbyak.py script reports the name-level inventory:
 
   Xbyak unique mnemonic names:                  1895
   Xbyak mnemonic overloads:                     2714
-  rxbyak handwritten public instruction methods: 606
+  rxbyak handwritten public instruction methods: 612
   rxbyak generated unique methods:               834
-  Xbyak names matched after Rust API mapping:    1331
-  Xbyak names not matched:                        564
+  Xbyak names matched after Rust API mapping:    1335
+  Xbyak names not matched:                        560
 
 The 564 unmatched names are an audit queue, not 564 proven missing encoders.
 They include 32-bit-only instructions, Xbyak aliases for an existing immediate
@@ -414,9 +414,10 @@ The first synchronization slice has:
   - removed the six retired Xeon Phi methods that rxbyak still exposed;
   - ported Xbyak 7.39 reset ordering, including RX-to-RW restoration and
     clearing pending relocation state before reusing a code buffer;
+  - ported the ACE 1.15 BSR0 register and bsrinit/bsrmovf/bsrmovh/bsrmovl;
   - confirmed the emitted bytes directly against Xbyak v7.40.
 
-Still pending from the direct v7.33.3-to-v7.40 mnemonic delta are the ACE 1.15
-BSR, AMX and conversion instructions. The wider pre-v7.33.3 unmatched set also
-needs classification and operand-form review; this document no longer claims
-that the existing instruction list proves full Xbyak parity.
+Still pending from the direct v7.33.3-to-v7.40 mnemonic delta are the remaining
+ACE 1.15 AMX and conversion instructions. The wider pre-v7.33.3 unmatched set
+also needs classification and operand-form review; this document no longer
+claims that the existing instruction list proves full Xbyak parity.

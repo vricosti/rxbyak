@@ -5941,6 +5941,91 @@ impl CodeAssembler {
         self.fpu_st(0xDB, 0xD8, src)
     }
 
+    // ── ACE 1.15 block-scale register ─────────────────────────
+
+    /// `bsrinit bsr0`
+    pub fn bsrinit(&mut self, bsr: Reg) -> Result<()> {
+        if !bsr.is_bsr() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.emit_vex(
+            &bsr,
+            &bsr,
+            None,
+            TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W1,
+            0x49,
+            false,
+        )?;
+        self.buf.set_modrm(3, bsr.get_idx(), 0)
+    }
+
+    /// `bsrmovf bsr0, zmm, zmm/m512`
+    pub fn bsrmovf(&mut self, bsr: Reg, zmm: Reg, op: impl Into<RegMem>) -> Result<()> {
+        if !bsr.is_bsr() || !zmm.is_zmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &bsr,
+            Some(&zmm),
+            &op.into(),
+            TypeFlags::T_MUST_EVEX | TypeFlags::T_MAP6 | TypeFlags::T_EW1 | TypeFlags::T_N1,
+            0x95,
+            None,
+        )
+    }
+
+    /// `bsrmovh bsr0, zmm/m512`
+    pub fn bsrmovh_load(&mut self, bsr: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bsr_move_load(bsr, op.into(), TypeFlags::T_F2)
+    }
+
+    /// `bsrmovh zmm/m512, bsr0`
+    pub fn bsrmovh_store(&mut self, op: impl Into<RegMem>, bsr: Reg) -> Result<()> {
+        self.bsr_move_store(op.into(), bsr, TypeFlags::T_F2)
+    }
+
+    /// `bsrmovl bsr0, zmm/m512`
+    pub fn bsrmovl_load(&mut self, bsr: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bsr_move_load(bsr, op.into(), TypeFlags::T_F3)
+    }
+
+    /// `bsrmovl zmm/m512, bsr0`
+    pub fn bsrmovl_store(&mut self, op: impl Into<RegMem>, bsr: Reg) -> Result<()> {
+        self.bsr_move_store(op.into(), bsr, TypeFlags::T_F3)
+    }
+
+    fn bsr_move_load(&mut self, bsr: Reg, op: RegMem, prefix: TypeFlags) -> Result<()> {
+        if !bsr.is_bsr() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &bsr,
+            None,
+            &op,
+            TypeFlags::T_N1
+                | prefix
+                | TypeFlags::T_MAP6
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX,
+            0x95,
+            None,
+        )
+    }
+
+    fn bsr_move_store(&mut self, op: RegMem, bsr: Reg, prefix: TypeFlags) -> Result<()> {
+        if !bsr.is_bsr() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &bsr,
+            None,
+            &op,
+            TypeFlags::T_N1 | prefix | TypeFlags::T_MAP6 | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            0x95,
+            None,
+        )
+    }
+
     // ═══════════════════════════════════════════════════════════
     // AMX (Advanced Matrix Extensions) tile instructions
     // ═══════════════════════════════════════════════════════════

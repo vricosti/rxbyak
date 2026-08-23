@@ -290,6 +290,9 @@ pub const TMM5: Reg = Reg::tmm(5);
 pub const TMM6: Reg = Reg::tmm(6);
 pub const TMM7: Reg = Reg::tmm(7);
 
+// ACE 1.15 block-scale register (singleton)
+pub const BSR0: Reg = Reg::bsr();
+
 // Segment registers
 pub const ES: crate::operand::Segment = crate::operand::Segment::Es;
 pub const CS: crate::operand::Segment = crate::operand::Segment::Cs;
