@@ -3174,6 +3174,256 @@ impl CodeAssembler {
         self.buf.db(0xF9)
     }
     #[inline]
+    pub fn clzero(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xFC)
+    }
+    #[inline]
+    pub fn endbr32(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x1E)?;
+        self.buf.db(0xFB)
+    }
+    #[inline]
+    pub fn endbr64(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x1E)?;
+        self.buf.db(0xFA)
+    }
+    #[inline]
+    pub fn monitor(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xC8)
+    }
+    #[inline]
+    pub fn monitorx(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xFA)
+    }
+    #[inline]
+    pub fn mwait(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xC9)
+    }
+    #[inline]
+    pub fn mwaitx(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xFB)
+    }
+    #[inline]
+    pub fn rdmsr(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x32)
+    }
+    #[inline]
+    pub fn rdpmc(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x33)
+    }
+    #[inline]
+    pub fn rdrand(&mut self, reg: Reg) -> Result<()> {
+        if reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::new(6, crate::operand::Kind::Reg, reg.get_bit()),
+            &reg,
+            TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+    #[inline]
+    pub fn rdseed(&mut self, reg: Reg) -> Result<()> {
+        if reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::new(7, crate::operand::Kind::Reg, reg.get_bit()),
+            &reg,
+            TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+    #[inline]
+    pub fn rdfsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(0),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn rdgsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(1),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn wrfsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(2),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn wrgsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(3),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn senduipi(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(64) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg.cvt32()?,
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+    #[inline]
+    pub fn serialize(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xE8)
+    }
+    #[inline]
+    pub fn stac(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xCB)
+    }
+    #[inline]
+    pub fn syscall(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x05)
+    }
+    #[inline]
+    pub fn sysenter(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x34)
+    }
+    #[inline]
+    pub fn sysexit(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x35)
+    }
+    #[inline]
+    pub fn sysret(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x07)
+    }
+    #[inline]
+    pub fn wbinvd(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x09)
+    }
+    #[inline]
+    pub fn wrmsr(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x30)
+    }
+    #[inline]
+    pub fn xabort(&mut self, imm: u8) -> Result<()> {
+        self.buf.db(0xC6)?;
+        self.buf.db(0xF8)?;
+        self.buf.db(imm)
+    }
+    #[inline]
+    pub fn xbegin(&mut self, rel: u32) -> Result<()> {
+        self.buf.db(0xC7)?;
+        self.buf.db(0xF8)?;
+        self.buf.dd(rel)
+    }
+    #[inline]
+    pub fn xend(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xD5)
+    }
+    #[inline]
+    pub fn xgetbv(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xD0)
+    }
+    #[inline]
+    pub fn xlatb(&mut self) -> Result<()> {
+        self.buf.db(0xD7)
+    }
+    #[inline]
+    pub fn xresldtrk(&mut self) -> Result<()> {
+        self.buf.db(0xF2)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xE9)
+    }
+    #[inline]
+    pub fn xsusldtrk(&mut self) -> Result<()> {
+        self.buf.db(0xF2)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xE8)
+    }
+    #[inline]
+    pub fn clui(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xEE)
+    }
+    #[inline]
+    pub fn stui(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xEF)
+    }
+    #[inline]
+    pub fn testui(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xED)
+    }
+    #[inline]
+    pub fn uiret(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xEC)
+    }
+    #[inline]
     pub fn pause(&mut self) -> Result<()> {
         self.buf.db(0xF3)?;
         self.buf.db(0x90)
@@ -4687,14 +4937,53 @@ impl CodeAssembler {
     #[inline]
     pub fn clflush(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(7, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0xAE)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
     }
     /// `clflushopt [m]` — 66 0F AE /7
     #[inline]
     pub fn clflushopt(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(7, crate::operand::Kind::Reg, 32);
-        self.buf
-            .op_mr(&addr, &r, TypeFlags::T_66 | TypeFlags::T_0F, 0xAE)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    /// `cldemote [m]` — 0F 1C /0
+    #[inline]
+    pub fn cldemote(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr32(0),
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x1C,
+        )
+    }
+    /// `clwb [m]` — 66 0F AE /6
+    #[inline]
+    pub fn clwb(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr32(6),
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    /// `movrs r8/r16/r32/r64, [m]` — 0F 38 8A/8B /r
+    #[inline]
+    pub fn movrs(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &reg,
+            TypeFlags::T_0F38,
+            if reg.is_bit(8) { 0x8A } else { 0x8B },
+        )
     }
 
     // ── MOVMSKPS / MOVMSKPD ──────────────────────────────────

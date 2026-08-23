@@ -133,9 +133,8 @@ impl CodeBuffer {
             return Err(Error::InvalidZu);
         }
 
-        let p66 =
-            (r.is_bit(16) && addr.get_bit() > 0 && !(addr.get_bit() == 32 || addr.get_bit() == 64))
-                || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
+        let p66 = (r.is_bit(16) && !(addr.get_bit() == 32 || addr.get_bit() == 64))
+            || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
         if type_.contains(TypeFlags::T_66) || p66 {
             self.db(0x66)?;
         }

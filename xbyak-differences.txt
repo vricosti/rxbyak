@@ -395,18 +395,18 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 672
+  rxbyak handwritten public instruction methods: 710
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1557
-  Xbyak names not matched:                        322
+  Xbyak names matched after Rust API mapping:    1595
+  Xbyak names not matched:                        284
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    322
+    missing encoder/API names:                    284
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
 All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
 names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
-and POPFQ. The remaining 322 names require an encoder or public API audit.
+and POPFQ. The remaining 284 names require an encoder or public API audit.
 Conversely, a matched name does not prove that every Xbyak overload or
 validation rule is present. Operand-form and byte-level parity must therefore
 still be reviewed family by family.
@@ -539,3 +539,22 @@ legacy single GroupMask. The implementation and its Windows-only contract test
 type-check with `cargo check --target x86_64-pc-windows-gnu --tests`. This audit
 host has neither Wine nor a MinGW linker, so native Windows runtime/differential
 execution remains pending and is not claimed as verified.
+
+The system/control-instruction slice ports 38 previously missing active
+mnemonic names from xbyak_mnemonic.h: CLZERO, CET indirect-branch markers,
+MONITOR/MWAIT variants, MSR/performance-counter access, SERIALIZE, SMAP,
+system-call entry/return, cache write-back, RTM, XGETBV/XLATB, load-address
+tracking, user interrupts, RDRAND/RDSEED, FSGSBASE, SENDUIPI, CLDEMOTE, CLWB,
+and MOVRS. Rust keeps Xbyak's generic Reg acceptance for RDRAND/RDSEED and
+MOVRS rather than imposing a narrower GPR-only policy. Representative
+low/extended/EGPR registers, complex addresses, every zero-operand byte string,
+and the MOVRS REX2 rejection were generated directly with Xbyak v7.40 and are
+checked in as exact-byte regressions.
+
+That comparison exposed a shared encoder divergence: rxbyak's memory-form REX
+path only emitted operand-size override for a 16-bit register when the memory
+operand had an explicit size. Xbyak emits 0x66 for an unsized memory operand as
+well. The p66 condition now follows xbyak.h::rex literally; MOVRS AX is the
+focused regression. CLFLUSH and CLFLUSHOPT also carry Xbyak's
+T_ALLOW_DIFF_SIZE flag again. No binary-layout-bearing type changes in this
+slice.
