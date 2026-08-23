@@ -807,6 +807,50 @@ impl CodeBuffer {
         }
     }
 
+    /// Xbyak `opRext` with `disableRex=true`, used by MPX register forms.
+    #[inline]
+    pub(crate) fn op_rext_disable_rex(
+        &mut self,
+        rm: &RegMem,
+        ext: u8,
+        type_: TypeFlags,
+        code: u8,
+    ) -> Result<()> {
+        match rm {
+            RegMem::Mem(addr) => {
+                let op_bit = if addr.get_bit() == 64 {
+                    32
+                } else {
+                    addr.get_bit()
+                };
+                let r = Reg::new(ext, crate::operand::Kind::Reg, op_bit);
+                self.op_mr(addr, &r, type_, code)
+            }
+            RegMem::Reg(reg) if reg.is_reg() && (reg.is_bit(32) || reg.is_bit(64)) => {
+                let op_bit = if reg.is_bit(64) { 32 } else { reg.get_bit() };
+                let r = Reg::new(ext, crate::operand::Kind::Reg, op_bit);
+                let operand = Reg::new(reg.get_idx(), crate::operand::Kind::Reg, op_bit);
+                self.op_rr(&r, &operand, type_ | TypeFlags::T_ALLOW_ABCDH, code)
+            }
+            RegMem::Reg(_) => Err(Error::BadCombination),
+        }
+    }
+
+    /// Encode Xbyak's non-optimizing MPX MIB address form.
+    #[inline]
+    pub(crate) fn op_mib(
+        &mut self,
+        addr: &Address,
+        reg: &Reg,
+        type_: TypeFlags,
+        code: u8,
+    ) -> Result<()> {
+        if addr.get_mode() != AddressMode::ModRM {
+            return Err(Error::InvalidMibAddress);
+        }
+        self.op_mr(&addr.clone_no_optimize(), reg, type_, code)
+    }
+
     /// Dispatch reg to reg-or-mem operand (opRO in C++).
     #[inline]
     pub(crate) fn op_ro(

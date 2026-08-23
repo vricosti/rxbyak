@@ -87,6 +87,7 @@ method names with suffixes:
   bt(op, imm)                   bt_imm(op, imm)
   adcx(d, reg, op)              adcx3(d, reg, op)
   adox(d, reg, op)              adox3(d, reg, op)
+  bndmov(mem, bnd)              bndmov_store(mem, bnd)
   shld(op, reg, imm)            shld(op, reg, imm)
   shld(op, reg, cl)             shld_cl(op, reg)
   pslld(xmm, xmm)              pslld(xmm, xmm)          [SSE register form]
@@ -397,12 +398,12 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 782
+  rxbyak handwritten public instruction methods: 791
   rxbyak generated unique methods:              1002
-  Xbyak names matched after Rust API mapping:    1661
-  Xbyak names not matched:                        218
+  Xbyak names matched after Rust API mapping:    1669
+  Xbyak names not matched:                        210
     compatibility aliases with existing encoder:   0
-    missing encoder/API names:                    218
+    missing encoder/API names:                    210
 
 The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
@@ -659,3 +660,16 @@ takes the APX branch before `isXMM_XMMorMEM` validation. Focused regressions
 cover that distinction, every public mnemonic, XMM16 rejection, both address
 paths and the four ENCODEKEY register thresholds. No binary-layout-bearing
 type changes in this slice.
+
+The MPX slice ports BND, BNDCL/BNDCN/BNDCU, BNDLDX/BNDSTX, BNDMK and both
+BNDMOV directions. Rust names the memory-destination overload
+`bndmov_store`; the load/register form retains `bndmov`. The encoder-owned
+`op_mib` counterpart enforces ModRM addressing and disables Xbyak's
+`[reg*2]` optimization exactly where MPX MIB requires the unmodified SIB.
+
+MPX register checks also use the `disableRex` branch of xbyak.h `opRext`:
+64-bit registers and explicitly sized m64 operands are converted to the
+32-bit encoding width before prefix selection. Differential bytes cover
+32/64-bit and extended registers, sized and unsized memory, BND-register
+moves, optimized versus non-optimized `[rax*2]`, and RIP rejection. No
+binary-layout-bearing type changes in this slice.

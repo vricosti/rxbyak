@@ -835,6 +835,93 @@ impl CodeAssembler {
         self.rao_int(addr, reg, TypeFlags::T_F3)
     }
 
+    /// `bnd` — emit the MPX branch prefix.
+    #[inline]
+    pub fn bnd(&mut self) -> Result<()> {
+        self.buf.db(0xF2)
+    }
+
+    fn bnd_check(&mut self, bnd: Reg, op: RegMem, prefix: TypeFlags, opcode: u8) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_rext_disable_rex(&op, bnd.get_idx(), prefix | TypeFlags::T_0F, opcode)
+    }
+
+    /// `bndcl bnd, r/m32/r/m64` — check lower bound.
+    #[inline]
+    pub fn bndcl(&mut self, bnd: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bnd_check(bnd, op.into(), TypeFlags::T_F3, 0x1A)
+    }
+
+    /// `bndcn bnd, r/m32/r/m64` — check upper bound using one's complement.
+    #[inline]
+    pub fn bndcn(&mut self, bnd: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bnd_check(bnd, op.into(), TypeFlags::T_F2, 0x1B)
+    }
+
+    /// `bndcu bnd, r/m32/r/m64` — check upper bound.
+    #[inline]
+    pub fn bndcu(&mut self, bnd: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bnd_check(bnd, op.into(), TypeFlags::T_F2, 0x1A)
+    }
+
+    /// `bndldx bnd, mib` — load bounds using an MPX address expression.
+    #[inline]
+    pub fn bndldx(&mut self, bnd: Reg, addr: Address) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_mib(&addr, &bnd, TypeFlags::T_0F, 0x1A)
+    }
+
+    /// `bndmk bnd, m` — create bounds.
+    #[inline]
+    pub fn bndmk(&mut self, bnd: Reg, addr: Address) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_mr(&addr, &bnd, TypeFlags::T_F3 | TypeFlags::T_0F, 0x1B)
+    }
+
+    /// Xbyak's `bndmov bnd, bnd/m` load/register form.
+    #[inline]
+    pub fn bndmov(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        if !dst.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        let src = src.into();
+        self.buf.op_ro(
+            &dst,
+            &src,
+            TypeFlags::T_66 | TypeFlags::T_0F,
+            0x1A,
+            matches!(src, RegMem::Reg(reg) if reg.is_bndreg()),
+            0,
+        )
+    }
+
+    /// Xbyak's `bndmov m, bnd` store form.
+    #[inline]
+    pub fn bndmov_store(&mut self, addr: Address, src: Reg) -> Result<()> {
+        if !src.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_mr(&addr, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x1B)
+    }
+
+    /// `bndstx mib, bnd` — store bounds using an MPX address expression.
+    #[inline]
+    pub fn bndstx(&mut self, addr: Address, bnd: Reg) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_mib(&addr, &bnd, TypeFlags::T_0F, 0x1B)
+    }
+
     /// `or dst, src`
     #[inline]
     pub fn or_(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>) -> Result<()> {
