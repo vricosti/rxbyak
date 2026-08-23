@@ -282,6 +282,7 @@ const HANDWRITTEN: &[&str] = &[
     "scasq",
     "cmpsb",
     "cmpsw",
+    "cmpsd_string",
     "cmpsq",
     // CMPXCHG / XADD (hand-written)
     "cmpxchg",

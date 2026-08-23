@@ -6006,6 +6006,10 @@ impl CodeAssembler {
         self.buf.db(0xA7)
     }
     #[inline]
+    pub fn cmpsd_string(&mut self) -> Result<()> {
+        self.buf.db(0xA7)
+    }
+    #[inline]
     pub fn cmpsq(&mut self) -> Result<()> {
         self.buf.db(0x48)?;
         self.buf.db(0xA7)

@@ -121,8 +121,9 @@ x86 mnemonics that collide with Rust keywords get an underscore suffix:
   loop       loop_        Rust keyword (if ever added)
   mod        mod_         Rust keyword (if ever added)
 
-Additionally, movsd (string operation) is renamed to movsd_string() to
-avoid collision with the SSE movsd instruction which keeps the name movsd().
+Additionally, movsd and cmpsd string operations are renamed to
+movsd_string() and cmpsd_string() to avoid collisions with the SSE
+instructions, which retain the base mnemonic through their Rust APIs.
 
 
 6. FLAT Reg STRUCT INSTEAD OF CLASS HIERARCHY
@@ -348,8 +349,6 @@ Why: A newtype prevents accidentally mixing TypeFlags with raw integers.
   supported; all operands must be explicit
 - Custom allocators: xbyak supports custom allocators via template
   parameter; rxbyak uses the platform module directly
-- cmpsd string operation: Missing (cmpsb/cmpsw/cmpsq exist, but cmpsd
-  string would conflict with SSE cmpsd, like movsd/movsd_string)
 
 
 18. PLATFORM ABSTRACTION
@@ -409,7 +408,7 @@ optional omitted-operand overloads disabled) and reports:
 
   Xbyak active 64-bit mnemonic names:           1879
   Xbyak active 64-bit mnemonic overloads:        2439
-  rxbyak handwritten public instruction methods: 935
+  rxbyak handwritten public instruction methods: 936
   rxbyak generated/macro unique methods:         1162
   Xbyak names matched after Rust API mapping:    1879
   Xbyak names not matched:                          0
@@ -420,7 +419,8 @@ The tool excludes the 32-bit-only branch instead of mixing it into the queue.
 It separately identifies direct Xbyak forwarders and known spelling aliases.
 All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
 names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
-and POPFQ. The remaining 238 names require an encoder or public API audit.
+and POPFQ. All formerly unmatched names have now been classified and ported;
+operand-form and validation parity remain separate, family-by-family checks.
 Conversely, a matched name does not prove that every Xbyak overload or
 validation rule is present. Operand-form and byte-level parity must therefore
 still be reviewed family by family.
@@ -514,11 +514,11 @@ subleaf traversal. Feature constants retired by upstream (the Xeon Phi
 AVX-512 groups, PREFETCHWT1, and AMX_TRANSPOSE) are no longer exposed or set.
 The Apple on-demand AVX-512 rule and Intel cache SMT-width update also match
 the current C++ ordering. Public CPUID/XFEATURE helpers and fallible cache/core
-queries cover the remaining Cpu API surface using Rust Result in place of
-Xbyak exceptions. A native differential probe compared all feature bits
+queries cover the Cpu API surface using Rust Result in place of Xbyak
+exceptions. A native differential probe compared all feature bits
 0-101, family/model fields, topology counts, every data-cache entry, and the
 three version/palette values with Xbyak v7.40; all values matched on the audit
-host. CpuTopology remains a separate structural/platform audit slice.
+host. CpuTopology is covered by the subsequent structural/platform slices.
 
 CpuMask is now an owned topology type rather than a raw BTreeSet field. Its
 monotonic append contract, 0-1023 index range, inclusive ranges, strict list
@@ -527,8 +527,8 @@ the BTreeSet-backed implementation that upstream itself selects with
 XBYAK_CPUMASK_COMPACT=0 rather than reproducing the default 64-bit packed
 storage; no CpuMask bytes cross an ABI or serialization boundary. Rust Result
 reports the same invalid-index conditions that Xbyak reports by boolean return
-or exception. The platform-specific CpuTopology population remains the next
-slice.
+or exception. CpuTopology population is covered by the subsequent Linux and
+Windows slices.
 
 CpuTopology's common API and Linux population now follow Xbyak v7.40. The
 constructor derives hybrid state from Cpu and returns CantInitCpuTopology on
@@ -800,3 +800,9 @@ tests generated with Xbyak v7.40 cover all 40 Rust overload entry points and
 all 32 names, including high VSIB indices and scaled displacement encoding.
 Focused error tests cover every validation family. No binary-layout-bearing
 type changes.
+
+The final overloaded-string slice exposes Xbyak's zero-operand CMPSD as
+`cmpsd_string`, matching the existing `movsd_string` Rust overload convention
+while leaving the SSE comparison API distinct. Its single A7 byte is covered
+by the string-operation conformance test. No binary-layout-bearing type
+changes.

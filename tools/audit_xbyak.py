@@ -184,6 +184,7 @@ def upstream_spellings(methods: set[str]) -> set[str]:
         "std_": ("std",),
         "xor_": ("xor", "xor_"),
         "cmpsd_xmm": ("cmpsd",),
+        "cmpsd_string": ("cmpsd",),
         "movsd_string": ("movsd",),
     }.items():
         if rust_name in methods:

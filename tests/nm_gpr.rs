@@ -1426,6 +1426,10 @@ fn test_nm_string() {
         ("scasq".into(), Box::new(|a: &mut CodeAssembler| a.scasq())),
         ("cmpsb".into(), Box::new(|a: &mut CodeAssembler| a.cmpsb())),
         ("cmpsw".into(), Box::new(|a: &mut CodeAssembler| a.cmpsw())),
+        (
+            "cmpsd".into(),
+            Box::new(|a: &mut CodeAssembler| a.cmpsd_string()),
+        ),
         ("cmpsq".into(), Box::new(|a: &mut CodeAssembler| a.cmpsq())),
         // rep prefix combinations
         (
