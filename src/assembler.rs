@@ -1140,7 +1140,7 @@ impl CodeAssembler {
         let dfv = Self::validate_dfv(dfv)?;
         let imm_bit = Self::conditional_imm_bit(&op, imm)?;
         let op_bit = op.get_bit();
-        let opcode = 0x80 | u8::from((imm_bit as u16) < op_bit.min(32)) * 2;
+        let opcode = 0x80 | (u8::from((imm_bit as u16) < op_bit.min(32)) * 2);
         self.buf.op_roo(
             &Reg::new(15 - dfv, crate::operand::Kind::Reg, op_bit),
             &op,
@@ -5303,7 +5303,7 @@ impl CodeAssembler {
         let code = if src_bit == 8 { 0xF0u8 } else { 0xF1u8 };
         let mut type_ = TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_ALLOW_DIFF_SIZE;
         if src_bit == 16 {
-            type_ = type_ | TypeFlags::T_66;
+            type_ |= TypeFlags::T_66;
         }
         match &src {
             RegMem::Reg(s) => self.buf.op_rr(&dst, s, type_, code),
@@ -10409,6 +10409,7 @@ impl CodeAssembler {
     }
 
     // Xbyak opCvt3: scalar signed/unsigned integer to scalar float.
+    #[allow(clippy::too_many_arguments)] // Mirrors Xbyak's opCvt3 helper boundary.
     fn op_cvt3(
         &mut self,
         dst: Reg,

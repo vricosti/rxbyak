@@ -154,15 +154,11 @@ impl LabelManager {
                 }
                 LabelMode::AsIs => {
                     let d = label_offset as i64 - jmp.end_of_jmp as i64 + jmp.disp;
-                    if jmp.jmp_size <= 4 {
-                        if !(i32::MIN as i64..=i32::MAX as i64).contains(&d) {
-                            return Err(Error::OffsetIsTooBig);
-                        }
+                    if jmp.jmp_size <= 4 && !(i32::MIN as i64..=i32::MAX as i64).contains(&d) {
+                        return Err(Error::OffsetIsTooBig);
                     }
-                    if jmp.jmp_size == 1 {
-                        if !(-128..=127).contains(&d) {
-                            return Err(Error::LabelIsTooFar);
-                        }
+                    if jmp.jmp_size == 1 && !(-128..=127).contains(&d) {
+                        return Err(Error::LabelIsTooFar);
                     }
                     d as u64
                 }

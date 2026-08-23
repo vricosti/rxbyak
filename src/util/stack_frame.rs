@@ -324,7 +324,7 @@ impl StackFrame {
         let mut index = self.save_num;
         while index > 0 {
             let i = index - 1;
-            if self.use_regs & USE_PUSH2 != 0 && i & 1 == 0 && i >= start + 1 {
+            if self.use_regs & USE_PUSH2 != 0 && i & 1 == 0 && i > start {
                 if self.use_regs & USE_PPX != 0 {
                     asm.pop2p(self.save_regs[i], self.save_regs[i - 1])?;
                 } else {
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_no_save_num_within_bounds() {
-        assert!(NO_SAVE_NUM <= MAX_REG_NUM);
+        const { assert!(NO_SAVE_NUM <= MAX_REG_NUM) };
     }
 
     #[test]

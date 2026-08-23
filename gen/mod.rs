@@ -1,7 +1,7 @@
-/// Instruction table data structures for code generation.
-///
-/// Each instruction entry describes a mnemonic, its encoding flags,
-/// opcode, and the dispatch pattern (which internal helper to call).
+//! Instruction table data structures for code generation.
+//!
+//! Each instruction entry describes a mnemonic, its encoding flags,
+//! opcode, and the dispatch pattern (which internal helper to call).
 
 /// Dispatch pattern: which encoding helper the generated method calls.
 #[derive(Clone, Copy, Debug)]

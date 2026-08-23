@@ -243,9 +243,9 @@ impl CodeBuffer {
             let val = info.get_val(self.ptr)?;
             let bytes = val.to_le_bytes();
             let n = info.jmp_size as usize;
-            for i in 0..n {
+            for (i, byte) in bytes.iter().enumerate().take(n) {
                 unsafe {
-                    *self.ptr.add(info.code_offset + i) = bytes[i];
+                    *self.ptr.add(info.code_offset + i) = *byte;
                 }
             }
         }

@@ -400,13 +400,13 @@ impl CodeBuffer {
         let vvvv = !idx;
 
         let r_flag = reg.is_ext_idx();
-        let x3 = x_reg.map_or(false, |x| x.is_ext_idx()) || (base.is_simd() && base.is_ext_idx2());
+        let x3 = x_reg.is_some_and(|x| x.is_ext_idx()) || (base.is_simd() && base.is_ext_idx2());
         let b4 = if base.is_reg() && base.is_ext_idx2() {
             8u8
         } else {
             0
         };
-        let u = if x_reg.map_or(false, |x| x.is_reg() && x.is_ext_idx2()) {
+        let u = if x_reg.is_some_and(|x| x.is_reg() && x.is_ext_idx2()) {
             0u8
         } else {
             4
@@ -492,8 +492,8 @@ impl CodeBuffer {
             }
         }
 
-        let v4 = v.map_or(false, |v| v.is_ext_idx2()) || hi16_vidx;
-        let z_flag = reg.has_zero() || base.has_zero() || v.map_or(false, |v| v.has_zero());
+        let v4 = v.is_some_and(|v| v.is_ext_idx2()) || hi16_vidx;
+        let z_flag = reg.has_zero() || base.has_zero() || v.is_some_and(|v| v.has_zero());
 
         // Opmask
         let final_aaa = if aaa > 0 {
@@ -520,7 +520,7 @@ impl CodeBuffer {
             | (if rp { 0 } else { 0x10 })
             | b4
             | mmm)?;
-        self.db((if w == 1 { 0x80 } else { 0 }) | (((vvvv & 15) as u8) << 3) | u | (pp & 3))?;
+        self.db((if w == 1 { 0x80 } else { 0 }) | ((vvvv & 15) << 3) | u | (pp & 3))?;
         self.db((if z_bit { 0x80 } else { 0 })
             | ((ll & 3) << 5)
             | (if b_bit { 0x10 } else { 0 })
@@ -598,6 +598,7 @@ impl CodeBuffer {
 
     /// Encode Xbyak's APX/EVEX-legacy `(r, r, m)` or `(r, m, r)` form.
     #[inline]
+    #[allow(clippy::too_many_arguments)] // Mirrors Xbyak's opROO helper boundary.
     pub(crate) fn op_roo(
         &mut self,
         d: &Reg,
@@ -663,12 +664,11 @@ impl CodeBuffer {
         if r1.get_bit() != bit || (op2.is_reg() && op2.get_bit() != bit) {
             return Err(Error::BadCombination);
         }
-        type_ = type_
-            | if bit == 64 {
-                TypeFlags::T_W1
-            } else {
-                TypeFlags::T_W0
-            };
+        type_ |= if bit == 64 {
+            TypeFlags::T_W1
+        } else {
+            TypeFlags::T_W0
+        };
 
         if d.has_rex2() || r1.has_rex2() || op2.has_rex2() || d.get_nf() {
             self.op_roo(
@@ -997,7 +997,7 @@ impl CodeBuffer {
 
                 let need_evex = type_.intersects(TypeFlags::T_MUST_EVEX | TypeFlags::T_MEM_EVEX)
                     || r.has_evex()
-                    || p1.map_or(false, |p| p.has_evex())
+                    || p1.is_some_and(|p| p.has_evex())
                     || addr.is_broadcast()
                     || addr.get_opmask_idx() != 0
                     || addr.has_rex2();
@@ -1047,7 +1047,7 @@ impl CodeBuffer {
             RegMem::Reg(base) => {
                 let need_evex = type_.contains(TypeFlags::T_MUST_EVEX)
                     || r.has_evex()
-                    || p1.map_or(false, |p| p.has_evex())
+                    || p1.is_some_and(|p| p.has_evex())
                     || base.has_evex();
 
                 if need_evex {

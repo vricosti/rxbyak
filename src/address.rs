@@ -15,7 +15,7 @@ pub enum AddressMode {
 }
 
 /// A register expression representing `[base + index * scale + disp]`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RegExp {
     pub(crate) base: Reg,
     pub(crate) index: Reg,
@@ -28,20 +28,6 @@ pub struct RegExp {
     ///   disp32 = target - (current_emit_pos + 4 + imm_size)
     /// Matches Xbyak's `RegRip::isAddr_` used by `code.rip + void_ptr`.
     pub(crate) is_addr: bool,
-}
-
-impl Default for RegExp {
-    fn default() -> Self {
-        Self {
-            base: Reg::default(),
-            index: Reg::default(),
-            scale: 0,
-            disp: 0,
-            label_id: None,
-            rip: false,
-            is_addr: false,
-        }
-    }
 }
 
 impl RegExp {

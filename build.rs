@@ -1,4 +1,4 @@
-/// Build script: generates instruction methods from tables in gen/.
+//! Build script: generates instruction methods from tables in gen/.
 
 #[path = "gen/mod.rs"]
 mod gen;

@@ -1,7 +1,6 @@
 /// RDTSC-based cycle counter for benchmarking.
 ///
 /// Port of xbyak_util.h `Clock` class.
-
 /// High-resolution cycle counter using the x86 RDTSC instruction.
 pub struct Clock {
     clock: u64,
@@ -16,9 +15,13 @@ impl Clock {
     /// Read the current timestamp counter.
     #[inline]
     pub fn rdtsc() -> u64 {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86")]
         unsafe {
-            core::arch::x86_64::_rdtsc() as u64
+            core::arch::x86::_rdtsc()
+        }
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::x86_64::_rdtsc()
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
