@@ -6280,4 +6280,416 @@ impl CodeAssembler {
             None,
         )
     }
+
+    // ── ACE 1.15 vector conversions ───────────────────────────
+
+    /// `vcvtbf42hf8 xmm/ymm/zmm, xmm/ymm/m`
+    pub fn vcvtbf42hf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt1(
+            dst,
+            src.into(),
+            TypeFlags::T_N8
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x37,
+        )
+    }
+
+    /// `vcvtbf62hf8 xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvtbf62hf8(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x37,
+            None,
+        )
+    }
+
+    /// `vcvtbf82bf4s xmm/ymm/m, xmm/ymm/zmm`
+    pub fn vcvtbf82bf4s(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_vmov(
+            dst.into(),
+            src,
+            TypeFlags::T_N8
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3D,
+            true,
+        )
+    }
+
+    /// `vcvtbf82bf6s xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvtbf82bf6s(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &src,
+            None,
+            &RegMem::Reg(dst),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3E,
+            None,
+        )
+    }
+
+    /// `vcvtbf82ps xmm/ymm/zmm, xmm/m`
+    pub fn vcvtbf82ps(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_vmov(
+            src.into(),
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x36,
+            false,
+        )
+    }
+
+    /// `vcvtbiasps2bf8 xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2bf8(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x39,
+        )
+    }
+
+    /// `vcvtbiasps2bf8s xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2bf8s(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3B,
+        )
+    }
+
+    /// `vcvtbiasps2hf8 xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2hf8(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x38,
+        )
+    }
+
+    /// `vcvtbiasps2hf8s xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2hf8s(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3A,
+        )
+    }
+
+    /// `vcvthf62hf8 xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvthf62hf8(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x37,
+            None,
+        )
+    }
+
+    /// `vcvthf82bf4s xmm/ymm/m, xmm/ymm/zmm`
+    pub fn vcvthf82bf4s(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_vmov(
+            dst.into(),
+            src,
+            TypeFlags::T_N8
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3D,
+            true,
+        )
+    }
+
+    /// `vcvthf82hf6s xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvthf82hf6s(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &src,
+            None,
+            &RegMem::Reg(dst),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3C,
+            None,
+        )
+    }
+
+    /// `vcvthf82ps xmm/ymm/zmm, xmm/m`
+    pub fn vcvthf82ps(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_vmov(
+            src.into(),
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x36,
+            false,
+        )
+    }
+
+    pub fn vcvtps2bf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x39,
+        )
+    }
+
+    pub fn vcvtps2bf8s(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3B,
+        )
+    }
+
+    pub fn vcvtps2hf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x38,
+        )
+    }
+
+    pub fn vcvtps2hf8s(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3A,
+        )
+    }
+
+    pub fn vcvtrops2hf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x38,
+        )
+    }
+
+    pub fn vcvtrops2hf8s(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3A,
+        )
+    }
+
+    /// `vpmovssdb xmm/m, xmm/ymm/zmm`
+    pub fn vpmovssdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_vmov(
+            dst.into(),
+            src,
+            TypeFlags::T_N4
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_F3
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x41,
+            false,
+        )
+    }
+
+    /// `vunpackb xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`
+    pub fn vunpackb(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        let zero = if dst.is_zmm() {
+            Reg::zmm(0)
+        } else if dst.is_ymm() {
+            Reg::ymm(0)
+        } else {
+            Reg::xmm(0)
+        };
+        self.op_avx_x_x_xm(
+            dst,
+            zero,
+            src,
+            TypeFlags::T_0F3A | TypeFlags::T_W0 | TypeFlags::T_YMM | TypeFlags::T_MUST_EVEX,
+            0x3D,
+            Some(imm),
+        )
+    }
+
+    // Xbyak opCvt1: (x, x/m), (y, x/m256), (z, y/m).
+    fn op_cvt1(&mut self, dst: Reg, src: RegMem, type_: TypeFlags, opcode: u8) -> Result<()> {
+        let valid = match src {
+            RegMem::Mem(_) => true,
+            RegMem::Reg(src) => {
+                ((dst.is_xmm() || dst.is_ymm()) && src.is_xmm()) || (dst.is_zmm() && src.is_ymm())
+            }
+        };
+        if !valid {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(&dst, None, &src, type_, opcode, None)
+    }
+
+    // Xbyak opCvt5: (x, x/y/z/xword/yword/zword).
+    fn op_cvt5(&mut self, dst: Reg, src: RegMem, type_: TypeFlags, opcode: u8) -> Result<()> {
+        let src_bit = src.get_bit();
+        if !dst.is_xmm() || !matches!(src_bit, 128 | 256 | 512) {
+            return Err(Error::BadCombination);
+        }
+        let kind = match src_bit {
+            128 => crate::operand::Kind::Xmm,
+            256 => crate::operand::Kind::Ymm,
+            _ => crate::operand::Kind::Zmm,
+        };
+        let encoded_dst = dst.copy_and_set_kind(kind);
+        let xmm0 = Reg::xmm(0);
+        self.buf
+            .op_vex(&encoded_dst, Some(&xmm0), &src, type_, opcode, None)
+    }
+
+    // Xbyak opCvt7: destination remains XMM regardless of source VL.
+    fn op_cvt7(
+        &mut self,
+        dst: Reg,
+        bias: Reg,
+        src: RegMem,
+        type_: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_xmm() || !bias.is_simd() || (!src.is_mem() && src.get_bit() != bias.get_bit()) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_vex(&dst, Some(&bias), &src, type_, opcode, None)
+    }
+
+    // Xbyak opVmov for vector-width narrowing conversions.
+    fn op_vmov(
+        &mut self,
+        operand: RegMem,
+        src: Reg,
+        type_: TypeFlags,
+        opcode: u8,
+        mode: bool,
+    ) -> Result<()> {
+        if !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        let valid = match operand {
+            RegMem::Mem(_) => true,
+            RegMem::Reg(dst) if mode => {
+                (dst.is_xmm() && (src.is_xmm() || src.is_ymm())) || (dst.is_ymm() && src.is_zmm())
+            }
+            RegMem::Reg(dst) => dst.is_xmm(),
+        };
+        if !valid {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(&src, None, &operand, type_, opcode, None)
+    }
 }
