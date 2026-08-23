@@ -72,6 +72,25 @@ fn test_align_rejects_non_power_of_two_like_xbyak() {
 }
 
 #[test]
+fn test_reset_restores_writable_buffer_and_label_state() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    let first = asm.create_label();
+    asm.bind(&first).unwrap();
+    asm.mov(EAX, 1).unwrap();
+    asm.ret().unwrap();
+    asm.ready().unwrap();
+
+    asm.reset().unwrap();
+    assert_eq!(asm.size(), 0);
+
+    let second = asm.create_label();
+    asm.bind(&second).unwrap();
+    asm.mov(EAX, 2).unwrap();
+    asm.ret().unwrap();
+    assert_eq!(asm.code(), [0xB8, 2, 0, 0, 0, 0xC3]);
+}
+
+#[test]
 fn test_ret() {
     let code = assemble(|a| a.ret());
     assert_eq!(code, [0xC3]);

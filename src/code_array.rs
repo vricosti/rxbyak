@@ -61,6 +61,7 @@ pub struct CodeBuffer {
     size: usize,
     capacity: usize,
     mode: AllocMode,
+    protection: Option<ProtectMode>,
     addr_info_list: Vec<AddrInfo>,
     calc_jmp_called: bool,
 }
@@ -87,6 +88,7 @@ impl CodeBuffer {
             size: 0,
             capacity: cap,
             mode,
+            protection: Some(ProtectMode::ReadWrite),
             addr_info_list: Vec::new(),
             calc_jmp_called: false,
         })
@@ -102,6 +104,7 @@ impl CodeBuffer {
             size: 0,
             capacity: size,
             mode: AllocMode::UserBuf,
+            protection: None,
             addr_info_list: Vec::new(),
             calc_jmp_called: false,
         }
@@ -145,6 +148,8 @@ impl CodeBuffer {
     /// Reset the code size to zero.
     pub fn reset_size(&mut self) {
         self.size = 0;
+        self.addr_info_list.clear();
+        self.calc_jmp_called = false;
     }
 
     /// Set the code size directly.
@@ -246,7 +251,9 @@ impl CodeBuffer {
         if self.mode == AllocMode::UserBuf {
             return Ok(());
         }
-        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadExec) }
+        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadExec)? };
+        self.protection = Some(ProtectMode::ReadExec);
+        Ok(())
     }
 
     /// Set memory protection to Read+Write.
@@ -254,7 +261,9 @@ impl CodeBuffer {
         if self.mode == AllocMode::UserBuf {
             return Ok(());
         }
-        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWrite) }
+        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWrite)? };
+        self.protection = Some(ProtectMode::ReadWrite);
+        Ok(())
     }
 
     /// Set memory protection to Read+Write+Execute.
@@ -262,7 +271,17 @@ impl CodeBuffer {
         if self.mode == AllocMode::UserBuf {
             return Ok(());
         }
-        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWriteExec) }
+        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWriteExec)? };
+        self.protection = Some(ProtectMode::ReadWriteExec);
+        Ok(())
+    }
+
+    /// Restore a protected allocated buffer to RW for `CodeGenerator::reset`.
+    pub(crate) fn restore_writable_after_reset(&mut self) -> Result<()> {
+        if self.protection == Some(ProtectMode::ReadExec) {
+            self.protect_rw()?;
+        }
+        Ok(())
     }
 
     /// Grow the buffer (for AutoGrow mode).
@@ -284,6 +303,7 @@ impl CodeBuffer {
 
         self.ptr = new_ptr;
         self.capacity = new_cap;
+        self.protection = Some(ProtectMode::ReadWrite);
         Ok(())
     }
 
@@ -352,5 +372,24 @@ mod tests {
         buf.db(0x90).unwrap();
         buf.db(0x90).unwrap();
         assert!(buf.db(0x90).is_err());
+    }
+
+    #[test]
+    fn test_reset_size_clears_xbyak_patch_state() {
+        let mut buf = CodeBuffer::new(4096, AllocMode::AutoGrow).unwrap();
+        buf.db(0x90).unwrap();
+        buf.addr_info_list.push(AddrInfo {
+            code_offset: 0,
+            jmp_addr: 0,
+            jmp_size: 4,
+            mode: LabelMode::AsIs,
+        });
+        buf.calc_jmp_called = true;
+
+        buf.reset_size();
+
+        assert_eq!(buf.size, 0);
+        assert!(buf.addr_info_list.is_empty());
+        assert!(!buf.calc_jmp_called);
     }
 }

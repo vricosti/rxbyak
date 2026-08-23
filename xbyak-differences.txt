@@ -412,6 +412,8 @@ The first synchronization slice has:
   - ported the 10-15 byte NOP table and the new default NOP mode;
   - aligned the complete prefetch family and its memory-size validation;
   - removed the six retired Xeon Phi methods that rxbyak still exposed;
+  - ported Xbyak 7.39 reset ordering, including RX-to-RW restoration and
+    clearing pending relocation state before reusing a code buffer;
   - confirmed the emitted bytes directly against Xbyak v7.40.
 
 Still pending from the direct v7.33.3-to-v7.40 mnemonic delta are the ACE 1.15

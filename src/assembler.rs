@@ -58,6 +58,16 @@ impl CodeAssembler {
         self.buf.reset_size();
     }
 
+    /// Reset emitted code and all labels, preserving the allocated buffer.
+    ///
+    /// If `ready()` made an owned buffer read-execute, restore read-write
+    /// protection after resetting the state, matching Xbyak 7.39 ordering.
+    pub fn reset(&mut self) -> Result<()> {
+        self.buf.reset_size();
+        self.label_mgr.reset();
+        self.buf.restore_writable_after_reset()
+    }
+
     /// Set the code size to a specific value.
     ///
     /// Used to reset the code pointer back to after the prelude when clearing
