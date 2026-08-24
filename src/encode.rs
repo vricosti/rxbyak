@@ -133,9 +133,8 @@ impl CodeBuffer {
             return Err(Error::InvalidZu);
         }
 
-        let p66 =
-            (r.is_bit(16) && addr.get_bit() > 0 && !(addr.get_bit() == 32 || addr.get_bit() == 64))
-                || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
+        let p66 = (r.is_bit(16) && !(addr.get_bit() == 32 || addr.get_bit() == 64))
+            || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
         if type_.contains(TypeFlags::T_66) || p66 {
             self.db(0x66)?;
         }
@@ -401,13 +400,13 @@ impl CodeBuffer {
         let vvvv = !idx;
 
         let r_flag = reg.is_ext_idx();
-        let x3 = x_reg.map_or(false, |x| x.is_ext_idx()) || (base.is_simd() && base.is_ext_idx2());
+        let x3 = x_reg.is_some_and(|x| x.is_ext_idx()) || (base.is_simd() && base.is_ext_idx2());
         let b4 = if base.is_reg() && base.is_ext_idx2() {
             8u8
         } else {
             0
         };
-        let u = if x_reg.map_or(false, |x| x.is_reg() && x.is_ext_idx2()) {
+        let u = if x_reg.is_some_and(|x| x.is_reg() && x.is_ext_idx2()) {
             0u8
         } else {
             4
@@ -493,8 +492,8 @@ impl CodeBuffer {
             }
         }
 
-        let v4 = v.map_or(false, |v| v.is_ext_idx2()) || hi16_vidx;
-        let z_flag = reg.has_zero() || base.has_zero() || v.map_or(false, |v| v.has_zero());
+        let v4 = v.is_some_and(|v| v.is_ext_idx2()) || hi16_vidx;
+        let z_flag = reg.has_zero() || base.has_zero() || v.is_some_and(|v| v.has_zero());
 
         // Opmask
         let final_aaa = if aaa > 0 {
@@ -521,7 +520,7 @@ impl CodeBuffer {
             | (if rp { 0 } else { 0x10 })
             | b4
             | mmm)?;
-        self.db((if w == 1 { 0x80 } else { 0 }) | (((vvvv & 15) as u8) << 3) | u | (pp & 3))?;
+        self.db((if w == 1 { 0x80 } else { 0 }) | ((vvvv & 15) << 3) | u | (pp & 3))?;
         self.db((if z_bit { 0x80 } else { 0 })
             | ((ll & 3) << 5)
             | (if b_bit { 0x10 } else { 0 })
@@ -530,6 +529,164 @@ impl CodeBuffer {
         self.db(code)?;
 
         Ok(disp8n)
+    }
+
+    /// Emit the EVEX-legacy prefix used by APX instructions.
+    ///
+    /// This is the Rust counterpart of Xbyak `evexLeg`.
+    #[inline]
+    pub(crate) fn emit_evex_legacy(
+        &mut self,
+        r: &Reg,
+        b: &Reg,
+        x: &Reg,
+        v: &Reg,
+        type_: TypeFlags,
+        sc: Option<u8>,
+    ) -> Result<()> {
+        let map = match type_.get_map() {
+            0 => 4,
+            map => map,
+        };
+        let r3 = if r.is_ext_idx() { 0 } else { 0x80 };
+        let x3 = if x.is_ext_idx() { 0 } else { 0x40 };
+        let b3 = if b.is_ext_idx() { 0 } else { 0x20 };
+        let r4 = if r.is_ext_idx2() { 0 } else { 0x10 };
+        let b4 = if b.is_ext_idx2() { 0x08 } else { 0 };
+        let w = if type_.contains(TypeFlags::T_W0) {
+            0
+        } else if r.is_bit(64) || v.is_bit(64) || type_.contains(TypeFlags::T_W1) {
+            1
+        } else {
+            0
+        };
+        let vvvv = ((!v.get_idx()) & 15) << 3;
+        let x4 = if x.is_ext_idx2() { 0 } else { 0x04 };
+        let pp = if type_.intersects(TypeFlags::T_F2 | TypeFlags::T_F3 | TypeFlags::T_66) {
+            type_.get_pp()
+        } else if r.is_bit(16) || v.is_bit(16) {
+            1
+        } else {
+            0
+        };
+        let v4 = if v.is_ext_idx2() { 0 } else { 1 };
+        let nd = if type_.contains(TypeFlags::T_ZU) {
+            u8::from(r.get_zu() || b.get_zu())
+        } else if type_.contains(TypeFlags::T_ND1) {
+            1
+        } else if type_.contains(TypeFlags::T_APX) {
+            0
+        } else {
+            u8::from(v.is_reg())
+        };
+        let nf = u8::from(r.get_nf() || b.get_nf() || x.get_nf() || v.get_nf());
+        if !type_.contains(TypeFlags::T_NF) && nf != 0 {
+            return Err(Error::InvalidNf);
+        }
+        if !type_.contains(TypeFlags::T_ZU) && r.get_zu() {
+            return Err(Error::InvalidZu);
+        }
+
+        self.db(0x62)?;
+        self.db(r3 | x3 | b3 | r4 | b4 | map)?;
+        self.db((w << 7) | vvvv | x4 | pp)?;
+        self.db(match sc {
+            Some(sc) => (nd << 4) | sc,
+            None => (nd << 4) | (v4 << 3) | (nf << 2),
+        })
+    }
+
+    /// Encode Xbyak's APX/EVEX-legacy `(r, r, m)` or `(r, m, r)` form.
+    #[inline]
+    #[allow(clippy::too_many_arguments)] // Mirrors Xbyak's opROO helper boundary.
+    pub(crate) fn op_roo(
+        &mut self,
+        d: &Reg,
+        op1: &RegMem,
+        op2: &RegMem,
+        type_: TypeFlags,
+        mut code: u8,
+        imm_size: u8,
+        sc: Option<u8>,
+    ) -> Result<bool> {
+        if !type_.contains(TypeFlags::T_MUST_EVEX)
+            && !d.is_reg()
+            && !d.has_rex2_nf_zu()
+            && !op1.has_rex2_nf_zu()
+            && !op2.has_rex2_nf_zu()
+        {
+            return Ok(false);
+        }
+
+        let mut p1 = *op1;
+        let mut p2 = *op2;
+        if p1.is_mem() {
+            core::mem::swap(&mut p1, &mut p2);
+        } else if p2.is_mem() {
+            code |= 2;
+        }
+        let RegMem::Reg(r) = p1 else {
+            return Err(Error::BadCombination);
+        };
+
+        match p2 {
+            RegMem::Mem(mut addr) => {
+                let exp = addr.get_reg_exp();
+                self.emit_evex_legacy(&r, exp.get_base(), exp.get_index(), d, type_, sc)?;
+                self.write_code(type_, d, code, false)?;
+                addr.imm_size = imm_size;
+                self.emit_addr(&addr, r.get_idx())?;
+            }
+            RegMem::Reg(op2) => {
+                self.emit_evex_legacy(&op2, &r, &Reg::default(), d, type_, sc)?;
+                self.write_code(type_, d, code, false)?;
+                self.set_modrm(3, op2.get_idx(), r.get_idx())?;
+            }
+        }
+        Ok(true)
+    }
+
+    /// Encode Xbyak's `(r, r, r/m)` BMI/APX form.
+    ///
+    /// This is the direct counterpart of `xbyak.h::opRRO`: classic registers
+    /// use VEX, while EGPR operands (or destination NF) select EVEX-legacy.
+    #[inline]
+    pub(crate) fn op_rro(
+        &mut self,
+        d: &Reg,
+        r1: &Reg,
+        op2: &RegMem,
+        mut type_: TypeFlags,
+        code: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        let bit = d.get_bit();
+        if r1.get_bit() != bit || (op2.is_reg() && op2.get_bit() != bit) {
+            return Err(Error::BadCombination);
+        }
+        type_ |= if bit == 64 {
+            TypeFlags::T_W1
+        } else {
+            TypeFlags::T_W0
+        };
+
+        if d.has_rex2() || r1.has_rex2() || op2.has_rex2() || d.get_nf() {
+            self.op_roo(
+                r1,
+                op2,
+                &RegMem::Reg(*d),
+                type_,
+                code,
+                u8::from(imm8.is_some()),
+                None,
+            )?;
+            if let Some(imm) = imm8 {
+                self.db(imm)?;
+            }
+            Ok(())
+        } else {
+            self.op_vex(d, Some(r1), op2, type_, code, imm8)
+        }
     }
 
     /// Encode reg-reg instruction: REX + opcode + ModR/M(mod=3).
@@ -564,6 +721,60 @@ impl CodeBuffer {
         self.emit_addr(addr, r.get_idx())
     }
 
+    /// Xbyak `opMR` with its optional APX/EVEX-legacy alternate encoding.
+    #[allow(clippy::too_many_arguments)]
+    #[inline]
+    pub(crate) fn op_mr_alt(
+        &mut self,
+        addr: &Address,
+        r: &Reg,
+        type_: TypeFlags,
+        code: u8,
+        type2: TypeFlags,
+        code2: u8,
+    ) -> Result<()> {
+        if type2 != TypeFlags::NONE
+            && self.op_roo(
+                &Reg::default(),
+                &RegMem::Mem(*addr),
+                &RegMem::Reg(*r),
+                type2,
+                code2,
+                0,
+                None,
+            )?
+        {
+            return Ok(());
+        }
+        self.op_mr(addr, r, type_, code)
+    }
+
+    /// Encode the memory form of LFS/LGS/LSS.
+    ///
+    /// This mirrors Xbyak `opLoadSeg`; unlike `op_mr`, the opcode is written
+    /// literally after the optional 0F map byte.
+    #[inline]
+    pub(crate) fn op_load_seg(
+        &mut self,
+        addr: &Address,
+        reg: &Reg,
+        type_: TypeFlags,
+        code: u8,
+    ) -> Result<()> {
+        if reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if addr.is_64bit_disp() {
+            return Err(Error::CantUse64BitDisp);
+        }
+        let _rex2 = self.emit_rex_for_reg_mem(reg, addr, type_)?;
+        if type_.contains(TypeFlags::T_0F) {
+            self.db(0x0F)?;
+        }
+        self.db(code)?;
+        self.emit_addr(addr, reg.get_idx())
+    }
+
     /// Encode reg + (reg or mem) instruction with extension field.
     #[inline]
     pub(crate) fn op_rext(
@@ -594,6 +805,50 @@ impl CodeBuffer {
                 self.op_rr(&r, reg, type_ | TypeFlags::T_ALLOW_ABCDH, code)
             }
         }
+    }
+
+    /// Xbyak `opRext` with `disableRex=true`, used by MPX register forms.
+    #[inline]
+    pub(crate) fn op_rext_disable_rex(
+        &mut self,
+        rm: &RegMem,
+        ext: u8,
+        type_: TypeFlags,
+        code: u8,
+    ) -> Result<()> {
+        match rm {
+            RegMem::Mem(addr) => {
+                let op_bit = if addr.get_bit() == 64 {
+                    32
+                } else {
+                    addr.get_bit()
+                };
+                let r = Reg::new(ext, crate::operand::Kind::Reg, op_bit);
+                self.op_mr(addr, &r, type_, code)
+            }
+            RegMem::Reg(reg) if reg.is_reg() && (reg.is_bit(32) || reg.is_bit(64)) => {
+                let op_bit = if reg.is_bit(64) { 32 } else { reg.get_bit() };
+                let r = Reg::new(ext, crate::operand::Kind::Reg, op_bit);
+                let operand = Reg::new(reg.get_idx(), crate::operand::Kind::Reg, op_bit);
+                self.op_rr(&r, &operand, type_ | TypeFlags::T_ALLOW_ABCDH, code)
+            }
+            RegMem::Reg(_) => Err(Error::BadCombination),
+        }
+    }
+
+    /// Encode Xbyak's non-optimizing MPX MIB address form.
+    #[inline]
+    pub(crate) fn op_mib(
+        &mut self,
+        addr: &Address,
+        reg: &Reg,
+        type_: TypeFlags,
+        code: u8,
+    ) -> Result<()> {
+        if addr.get_mode() != AddressMode::ModRM {
+            return Err(Error::InvalidMibAddress);
+        }
+        self.op_mr(&addr.clone_no_optimize(), reg, type_, code)
     }
 
     /// Dispatch reg to reg-or-mem operand (opRO in C++).
@@ -633,10 +888,73 @@ impl CodeBuffer {
         code: u8,
         imm8: Option<u8>,
     ) -> Result<()> {
+        if (r.is_xmm() && r.get_idx() >= 16)
+            || matches!(op, RegMem::Reg(reg) if reg.is_xmm() && reg.get_idx() >= 16)
+        {
+            return Err(Error::NotSupported);
+        }
         self.op_ro(r, op, type_, code, true, if imm8.is_some() { 1 } else { 0 })?;
         if let Some(imm) = imm8 {
             self.db(imm)?;
         }
+        Ok(())
+    }
+
+    /// Encode Xbyak's Key Locker SSE/APX memory form.
+    #[allow(clippy::too_many_arguments)]
+    #[inline]
+    pub(crate) fn op_sse_apx(
+        &mut self,
+        x: &Reg,
+        op: &RegMem,
+        type1: TypeFlags,
+        code1: u8,
+        type2: TypeFlags,
+        code2: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        if x.get_idx() <= 15
+            && op.has_rex2()
+            && self.op_roo(
+                &Reg::default(),
+                op,
+                &RegMem::Reg(*x),
+                type2,
+                code2,
+                u8::from(imm8.is_some()),
+                None,
+            )?
+        {
+            if let Some(imm) = imm8 {
+                self.db(imm)?;
+            }
+            return Ok(());
+        }
+        if !x.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.op_sse(x, op, type1, code1, imm8)
+    }
+
+    /// Encode Xbyak's Key Locker ENCODEKEY legacy/APX forms.
+    #[inline]
+    pub(crate) fn op_encode_key(&mut self, r1: &Reg, r2: &Reg, code1: u8, code2: u8) -> Result<()> {
+        if r1.get_idx() < 8 && r2.get_idx() < 8 {
+            self.db(0xF3)?;
+            self.db(0x0F)?;
+            self.db(0x38)?;
+            self.db(code1)?;
+            return self.set_modrm(3, r1.get_idx(), r2.get_idx());
+        }
+        self.op_roo(
+            &Reg::default(),
+            &RegMem::Reg(*r2),
+            &RegMem::Reg(*r1),
+            TypeFlags::T_MUST_EVEX | TypeFlags::T_F3,
+            code2,
+            0,
+            None,
+        )?;
         Ok(())
     }
 
@@ -660,6 +978,13 @@ impl CodeBuffer {
     ) -> Result<()> {
         match op2 {
             RegMem::Mem(addr) => {
+                // Xbyak 7.37.6: zeroing has no meaning when the architectural
+                // destination is memory. T_M_K marks those reversed forms.
+                if type_.contains(TypeFlags::T_M_K)
+                    && (r.has_zero() || p1.is_some_and(Reg::has_zero) || addr.has_zero())
+                {
+                    return Err(Error::InvalidZero);
+                }
                 let mut addr = *addr;
                 let exp = addr.get_reg_exp();
                 let base = *exp.get_base();
@@ -672,11 +997,16 @@ impl CodeBuffer {
 
                 let need_evex = type_.intersects(TypeFlags::T_MUST_EVEX | TypeFlags::T_MEM_EVEX)
                     || r.has_evex()
-                    || p1.map_or(false, |p| p.has_evex())
+                    || p1.is_some_and(|p| p.has_evex())
                     || addr.is_broadcast()
+                    || addr.get_opmask_idx() != 0
                     || addr.has_rex2();
 
                 if need_evex {
+                    let aaa = addr.get_opmask_idx();
+                    if aaa != 0 && !type_.contains(TypeFlags::T_M_K) {
+                        return Err(Error::InvalidOpmaskWithMemory);
+                    }
                     let b = addr.is_broadcast();
                     if b && !type_.intersects(TypeFlags::T_B32 | TypeFlags::T_B64) {
                         return Err(Error::InvalidBroadcast);
@@ -695,7 +1025,7 @@ impl CodeBuffer {
                         code,
                         Some(&index),
                         b,
-                        0,
+                        aaa,
                         vl,
                         hi16_vidx,
                     )?;
@@ -717,7 +1047,7 @@ impl CodeBuffer {
             RegMem::Reg(base) => {
                 let need_evex = type_.contains(TypeFlags::T_MUST_EVEX)
                     || r.has_evex()
-                    || p1.map_or(false, |p| p.has_evex())
+                    || p1.is_some_and(|p| p.has_evex())
                     || base.has_evex();
 
                 if need_evex {
@@ -732,5 +1062,43 @@ impl CodeBuffer {
             self.db(imm)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address::ptr;
+    use crate::code_array::AllocMode;
+    use crate::reg::{R16D, R8D, RAX};
+
+    #[test]
+    fn op_mr_alt_selects_legacy_or_apx_like_xbyak_7_40() {
+        let address = ptr(RAX.into());
+
+        let mut legacy = CodeBuffer::new(64, AllocMode::Alloc).unwrap();
+        legacy
+            .op_mr_alt(
+                &address,
+                &R8D,
+                TypeFlags::T_0F38,
+                0xF9,
+                TypeFlags::T_APX,
+                0xF9,
+            )
+            .unwrap();
+        assert_eq!(legacy.as_slice(), [0x44, 0x0F, 0x38, 0xF9, 0x00]);
+
+        let mut apx = CodeBuffer::new(64, AllocMode::Alloc).unwrap();
+        apx.op_mr_alt(
+            &address,
+            &R16D,
+            TypeFlags::T_0F38,
+            0xF9,
+            TypeFlags::T_APX,
+            0xF9,
+        )
+        .unwrap();
+        assert_eq!(apx.as_slice(), [0x62, 0xE4, 0x7C, 0x08, 0xF9, 0x00]);
     }
 }

@@ -3,8 +3,12 @@
 /// Port of xbyak_util.h `Cpu` class. Detects x86/x64 CPU features
 /// at runtime using the CPUID instruction.
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86")]
+use core::arch::x86::{__cpuid, __cpuid_count, _xgetbv};
+#[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::{__cpuid, __cpuid_count, _xgetbv};
+
+use crate::error::{Error, Result};
 
 /// 128-bit CPU feature type (low 64 + high 64 bits).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -36,6 +40,12 @@ impl CpuType {
     pub fn is_empty(self) -> bool {
         self.lo == 0 && self.hi == 0
     }
+    pub const fn get_l(self) -> u64 {
+        self.lo
+    }
+    pub const fn get_h(self) -> u64 {
+        self.hi
+    }
 }
 
 impl std::ops::BitOr for CpuType {
@@ -52,6 +62,13 @@ impl std::ops::BitOrAssign for CpuType {
     fn bitor_assign(&mut self, rhs: Self) {
         self.lo |= rhs.lo;
         self.hi |= rhs.hi;
+    }
+}
+
+impl std::ops::BitAndAssign for CpuType {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.lo &= rhs.lo;
+        self.hi &= rhs.hi;
     }
 }
 
@@ -110,15 +127,12 @@ cpu_feature!(MOVBE, 34);
 cpu_feature!(AVX512F, 35);
 cpu_feature!(AVX512DQ, 36);
 cpu_feature!(AVX512_IFMA, 37);
-cpu_feature!(AVX512PF, 38);
-cpu_feature!(AVX512ER, 39);
+pub const AVX512IFMA: CpuType = AVX512_IFMA;
 cpu_feature!(AVX512CD, 40);
 cpu_feature!(AVX512BW, 41);
 cpu_feature!(AVX512VL, 42);
 cpu_feature!(AVX512_VBMI, 43);
-cpu_feature!(AVX512_4VNNIW, 44);
-cpu_feature!(AVX512_4FMAPS, 45);
-cpu_feature!(PREFETCHWT1, 46);
+pub const AVX512VBMI: CpuType = AVX512_VBMI;
 cpu_feature!(PREFETCHW, 47);
 cpu_feature!(SHA, 48);
 cpu_feature!(MPX, 49);
@@ -163,13 +177,16 @@ cpu_feature!(KEYLOCKER_WIDE, 87);
 cpu_feature!(SSE4A, 88);
 cpu_feature!(CLWB, 89);
 cpu_feature!(TSXLDTRK, 90);
-cpu_feature!(AMX_TRANSPOSE, 91);
 cpu_feature!(AMX_TF32, 92);
 cpu_feature!(AMX_AVX512, 93);
 cpu_feature!(AMX_MOVRS, 94);
 cpu_feature!(AMX_FP8, 95);
 cpu_feature!(MOVRS, 96);
 cpu_feature!(HYBRID, 97);
+cpu_feature!(AMX_COMPLEX, 98);
+cpu_feature!(ACE, 99);
+cpu_feature!(AVX10_V1_AUX, 100);
+cpu_feature!(AVX10_V2_AUX, 101);
 
 /// CPU feature detection.
 pub struct Cpu {
@@ -186,17 +203,22 @@ pub struct Cpu {
     cores_sharing_data_cache: [u32; 10],
     data_cache_levels: u32,
     avx10_version: u32,
+    ace_version: u32,
+    max_palette: u32,
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn extract_bit(val: u32, base: u32, end: u32) -> u32 {
     (val >> base) & ((1u32 << (end + 1 - base)) - 1)
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn get32_as_le(s: &[u8; 4]) -> u32 {
     u32::from_le_bytes(*s)
 }
 
 /// Check if [ebx:ecx:edx] matches a 12-byte vendor string.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn is_vendor(ebx: u32, ecx: u32, edx: u32, vendor: &[u8; 12]) -> bool {
     let mut buf = [0u8; 4];
     buf.copy_from_slice(&vendor[0..4]);
@@ -209,9 +231,8 @@ fn is_vendor(ebx: u32, ecx: u32, edx: u32, vendor: &[u8; 12]) -> bool {
 }
 
 impl Cpu {
-    /// Detect CPU features. On non-x86 platforms, returns empty feature set.
-    pub fn new() -> Self {
-        let mut cpu = Cpu {
+    fn empty() -> Self {
+        Self {
             type_: CpuType::default(),
             model: 0,
             family: 0,
@@ -225,10 +246,24 @@ impl Cpu {
             cores_sharing_data_cache: [0; 10],
             data_cache_levels: 0,
             avx10_version: 0,
-        };
+            ace_version: 0,
+            max_palette: 0,
+        }
+    }
+
+    /// Detect CPU features. On non-x86 platforms, returns an empty feature set.
+    pub fn new() -> Self {
+        let cpu = Self::empty();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        cpu.detect();
-        cpu
+        {
+            let mut cpu = cpu;
+            cpu.detect();
+            cpu
+        }
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            cpu
+        }
     }
 
     /// Check if the CPU has a specific feature.
@@ -238,17 +273,17 @@ impl Cpu {
 
     /// Get number of logical processors per topology level.
     /// `SmtLevel` (1) returns threads per core, `CoreLevel` (2) returns cores per package.
-    pub fn get_num_cores(&self, level: u32) -> u32 {
+    pub fn get_num_cores(&self, level: u32) -> Result<u32> {
         match level {
-            1 => self.num_cores[0], // SmtLevel
+            1 => Ok(self.num_cores[0]), // SmtLevel
             2 => {
                 if self.num_cores[0] == 0 {
-                    0
+                    Err(Error::X2apicIsNotSupported)
                 } else {
-                    self.num_cores[1] / self.num_cores[0]
+                    Ok(self.num_cores[1] / self.num_cores[0])
                 }
             } // CoreLevel
-            _ => 0,
+            _ => Err(Error::X2apicIsNotSupported),
         }
     }
 
@@ -258,26 +293,75 @@ impl Cpu {
     }
 
     /// Data cache size in bytes for level `i` (0-indexed).
-    pub fn data_cache_size(&self, i: u32) -> Option<u32> {
+    pub fn data_cache_size(&self, i: u32) -> Result<u32> {
         if i < self.data_cache_levels {
-            Some(self.data_cache_size[i as usize])
+            Ok(self.data_cache_size[i as usize])
         } else {
-            None
+            Err(Error::BadParameter)
         }
     }
 
     /// Number of cores sharing data cache at level `i`.
-    pub fn cores_sharing_data_cache(&self, i: u32) -> Option<u32> {
+    pub fn cores_sharing_data_cache(&self, i: u32) -> Result<u32> {
         if i < self.data_cache_levels {
-            Some(self.cores_sharing_data_cache[i as usize])
+            Ok(self.cores_sharing_data_cache[i as usize])
         } else {
-            None
+            Err(Error::BadParameter)
         }
     }
 
     /// AVX10 version (0 if not supported).
     pub fn avx10_version(&self) -> u32 {
         self.avx10_version
+    }
+
+    /// ACE version reported by tile palette 2 (0 if unavailable).
+    pub fn ace_version(&self) -> u32 {
+        self.ace_version
+    }
+
+    /// Highest supported AMX tile palette.
+    pub fn max_palette(&self) -> u32 {
+        self.max_palette
+    }
+
+    pub fn put_family(&self) {
+        println!(
+            "family={}, model={:X}, stepping={}, extFamily={}, extModel={:X}",
+            self.family, self.model, self.stepping, self.ext_family, self.ext_model
+        );
+        println!(
+            "display:family={:X}, model={:X}",
+            self.display_family, self.display_model
+        );
+    }
+
+    pub fn get_cpuid_ex(eax: u32, ecx: u32) -> [u32; 4] {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            let value = unsafe { __cpuid_count(eax, ecx) };
+            [value.eax, value.ebx, value.ecx, value.edx]
+        }
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            let _ = (eax, ecx);
+            [0; 4]
+        }
+    }
+
+    pub fn get_cpuid(eax: u32) -> [u32; 4] {
+        Self::get_cpuid_ex(eax, 0)
+    }
+
+    pub fn get_xfeature() -> u64 {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            unsafe { _xgetbv(0) }
+        }
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            0
+        }
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -401,8 +485,10 @@ impl Cpu {
                 if r1.ecx & (1 << 28) != 0 {
                     self.type_ |= AVX;
                 }
-                // AVX-512 state check
-                if ((bv >> 5) & 7) == 7 {
+                // macOS enables AVX-512 state on demand, matching Xbyak's
+                // deliberate omission of the XCR0[7:5] gate on Apple hosts.
+                let avx512_state_enabled = cfg!(target_vendor = "apple") || ((bv >> 5) & 7) == 7;
+                if avx512_state_enabled {
                     let r7 = __cpuid_count(7, 0);
                     if r7.ebx & (1 << 16) != 0 {
                         self.type_ |= AVX512F;
@@ -413,12 +499,6 @@ impl Cpu {
                         }
                         if r7.ebx & (1 << 21) != 0 {
                             self.type_ |= AVX512_IFMA;
-                        }
-                        if r7.ebx & (1 << 26) != 0 {
-                            self.type_ |= AVX512PF;
-                        }
-                        if r7.ebx & (1 << 27) != 0 {
-                            self.type_ |= AVX512ER;
                         }
                         if r7.ebx & (1 << 28) != 0 {
                             self.type_ |= AVX512CD;
@@ -443,12 +523,6 @@ impl Cpu {
                         }
                         if r7.ecx & (1 << 14) != 0 {
                             self.type_ |= AVX512_VPOPCNTDQ;
-                        }
-                        if r7.edx & (1 << 2) != 0 {
-                            self.type_ |= AVX512_4VNNIW;
-                        }
-                        if r7.edx & (1 << 3) != 0 {
-                            self.type_ |= AVX512_4FMAPS;
                         }
                         if r7.edx & (1 << 8) != 0 {
                             self.type_ |= AVX512_VP2INTERSECT;
@@ -503,9 +577,6 @@ impl Cpu {
             }
             if r7.ebx & (1 << 29) != 0 {
                 self.type_ |= SHA;
-            }
-            if r7.ecx & (1 << 0) != 0 {
-                self.type_ |= PREFETCHWT1;
             }
             if r7.ecx & (1 << 5) != 0 {
                 self.type_ |= WAITPKG;
@@ -591,6 +662,9 @@ impl Cpu {
                 if r71.edx & (1 << 5) != 0 {
                     self.type_ |= AVX_NE_CONVERT;
                 }
+                if r71.edx & (1 << 8) != 0 {
+                    self.type_ |= AMX_COMPLEX;
+                }
                 if r71.edx & (1 << 10) != 0 {
                     self.type_ |= AVX_VNNI_INT16;
                 }
@@ -603,22 +677,27 @@ impl Cpu {
                 if r71.edx & (1 << 21) != 0 {
                     self.type_ |= APX_F;
                 }
+                if r71.ecx & (1 << 11) != 0 {
+                    self.type_ |= ACE;
+                }
+            }
 
-                let r1e = __cpuid_count(0x1e, 1);
-                if r1e.eax & (1 << 4) != 0 {
-                    self.type_ |= AMX_FP8;
-                }
-                if r1e.eax & (1 << 5) != 0 {
-                    self.type_ |= AMX_TRANSPOSE;
-                }
-                if r1e.eax & (1 << 6) != 0 {
-                    self.type_ |= AMX_TF32;
-                }
-                if r1e.eax & (1 << 7) != 0 {
-                    self.type_ |= AMX_AVX512;
-                }
-                if r1e.eax & (1 << 8) != 0 {
-                    self.type_ |= AMX_MOVRS;
+            if max_num >= 0x1e {
+                let r1e0 = __cpuid_count(0x1e, 0);
+                if r1e0.eax >= 1 {
+                    let r1e1 = __cpuid_count(0x1e, 1);
+                    if r1e1.eax & (1 << 4) != 0 {
+                        self.type_ |= AMX_FP8;
+                    }
+                    if r1e1.eax & (1 << 6) != 0 {
+                        self.type_ |= AMX_TF32;
+                    }
+                    if r1e1.eax & (1 << 7) != 0 {
+                        self.type_ |= AMX_AVX512;
+                    }
+                    if r1e1.eax & (1 << 8) != 0 {
+                        self.type_ |= AMX_MOVRS;
+                    }
                 }
             }
         }
@@ -637,8 +716,26 @@ impl Cpu {
         }
 
         if self.has(AVX10) && max_num >= 0x24 {
-            let r24 = __cpuid_count(0x24, 0);
-            self.avx10_version = r24.ebx & 0x7F;
+            let r240 = __cpuid_count(0x24, 0);
+            self.avx10_version = r240.ebx & 0x7F;
+            if r240.eax >= 1 {
+                let r241 = __cpuid_count(0x24, 1);
+                if r241.ecx & (1 << 2) != 0 {
+                    self.type_ |= AVX10_V1_AUX;
+                }
+                if r241.ecx & (1 << 3) != 0 {
+                    self.type_ |= AVX10_V2_AUX;
+                }
+            }
+        }
+
+        if self.has(AMX_TILE) && max_num >= 0x1d {
+            let r1d0 = __cpuid_count(0x1d, 0);
+            self.max_palette = r1d0.eax;
+            if self.has(ACE) && self.max_palette >= 2 {
+                let r1d2 = __cpuid_count(0x1d, 2);
+                self.ace_version = r1d2.eax & 0xFF;
+            }
         }
 
         self.set_family();
@@ -789,7 +886,7 @@ impl Cpu {
                 }
             }
         } else if self.has(INTEL) {
-            let smt_width = self.num_cores[0];
+            let mut smt_width = self.num_cores[0];
             let logical_cores = self.num_cores[1];
             for i in 0..10u32 {
                 let r = unsafe { __cpuid_count(4, i) };
@@ -809,13 +906,10 @@ impl Cpu {
                         * (r.ecx + 1);
                     let lvl = self.data_cache_levels as usize;
                     self.data_cache_size[lvl] = size;
-                    let sw = if smt_width == 0 && cache_type == 1 {
-                        actual
-                    } else {
-                        smt_width
-                    };
-                    self.cores_sharing_data_cache[lvl] =
-                        if sw > 0 { (actual / sw).max(1) } else { 1 };
+                    if cache_type == 1 && smt_width == 0 {
+                        smt_width = actual;
+                    }
+                    self.cores_sharing_data_cache[lvl] = (actual / smt_width.max(1)).max(1);
                     self.data_cache_levels += 1;
                 }
             }
@@ -837,10 +931,14 @@ mod tests {
     fn test_cpu_type_ops() {
         let a = CpuType::from_id(0);
         let b = CpuType::from_id(1);
-        let ab = a | b;
+        let mut ab = a | b;
         assert!(ab.contains(a));
         assert!(ab.contains(b));
         assert!(!a.contains(b));
+        ab &= a;
+        assert_eq!(ab, a);
+        assert_eq!(ab.get_l(), 1);
+        assert_eq!(ab.get_h(), 0);
     }
 
     #[test]
@@ -855,11 +953,42 @@ mod tests {
 
     #[test]
     fn test_cpu_feature_ids() {
-        assert_eq!(MMX.lo, 1 << 0);
-        assert_eq!(AVX.lo, 1 << 14);
-        assert_eq!(AVX512F.lo, 1 << 35);
-        assert_eq!(CLFLUSHOPT.lo, 1 << 63);
-        assert_eq!(CLDEMOTE.hi, 1 << 0);
-        assert_eq!(HYBRID.hi, 1 << (97 - 64));
+        assert_eq!(MMX.get_l(), 1 << 0);
+        assert_eq!(AVX.get_l(), 1 << 14);
+        assert_eq!(AVX512F.get_l(), 1 << 35);
+        assert_eq!(CLFLUSHOPT.get_l(), 1 << 63);
+        assert_eq!(CLDEMOTE.get_h(), 1 << 0);
+        assert_eq!(HYBRID.get_h(), 1 << (97 - 64));
+        assert_eq!(AMX_COMPLEX.get_h(), 1 << (98 - 64));
+        assert_eq!(ACE.get_h(), 1 << (99 - 64));
+        assert_eq!(AVX10_V1_AUX.get_h(), 1 << (100 - 64));
+        assert_eq!(AVX10_V2_AUX.get_h(), 1 << (101 - 64));
+    }
+
+    #[test]
+    fn test_cpu_query_errors_match_upstream() {
+        let cpu = Cpu::new();
+        assert_eq!(
+            cpu.get_num_cores(0).unwrap_err(),
+            Error::X2apicIsNotSupported
+        );
+        assert_eq!(
+            cpu.data_cache_size(cpu.data_cache_levels()).unwrap_err(),
+            Error::BadParameter
+        );
+        assert_eq!(
+            cpu.cores_sharing_data_cache(cpu.data_cache_levels())
+                .unwrap_err(),
+            Error::BadParameter
+        );
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    fn test_public_cpuid_helpers() {
+        let leaf = Cpu::get_cpuid(0);
+        let leaf_ex = Cpu::get_cpuid_ex(0, 0);
+        assert_eq!(leaf, leaf_ex);
+        assert_ne!(leaf[0], 0);
     }
 }

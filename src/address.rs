@@ -15,7 +15,7 @@ pub enum AddressMode {
 }
 
 /// A register expression representing `[base + index * scale + disp]`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RegExp {
     pub(crate) base: Reg,
     pub(crate) index: Reg,
@@ -28,20 +28,6 @@ pub struct RegExp {
     ///   disp32 = target - (current_emit_pos + 4 + imm_size)
     /// Matches Xbyak's `RegRip::isAddr_` used by `code.rip + void_ptr`.
     pub(crate) is_addr: bool,
-}
-
-impl Default for RegExp {
-    fn default() -> Self {
-        Self {
-            base: Reg::default(),
-            index: Reg::default(),
-            scale: 0,
-            disp: 0,
-            label_id: None,
-            rip: false,
-            is_addr: false,
-        }
-    }
 }
 
 impl RegExp {
@@ -98,7 +84,9 @@ impl RegExp {
     pub fn rip_addr(addr: i64) -> Self {
         Self {
             rip: true,
-            is_addr: true,
+            // Xbyak 7.35 treats a null pointer as the integer displacement
+            // zero instead of an absolute target address.
+            is_addr: addr != 0,
             disp: addr,
             ..Default::default()
         }
@@ -314,6 +302,10 @@ pub struct Address {
     pub(crate) permit_vsib: bool,
     /// Whether broadcast is enabled.
     pub(crate) broadcast: bool,
+    /// EVEX opmask index carried by a memory destination (`mem{k}`).
+    pub(crate) mask: u8,
+    /// Zeroing modifier preserved for Xbyak-compatible validation.
+    pub(crate) zero: bool,
     /// Whether optimization is enabled.
     pub(crate) optimize: bool,
     /// Optional label reference.
@@ -351,6 +343,8 @@ impl Address {
             disp8n: 0,
             permit_vsib: false,
             broadcast,
+            mask: 0,
+            zero: false,
             optimize: true,
         })
     }
@@ -380,6 +374,12 @@ impl Address {
     pub fn is_broadcast(&self) -> bool {
         self.broadcast
     }
+    pub fn get_opmask_idx(&self) -> u8 {
+        self.mask
+    }
+    pub fn has_zero(&self) -> bool {
+        self.zero
+    }
     pub fn is_vsib(&self) -> bool {
         self.exp.is_vsib()
     }
@@ -402,6 +402,30 @@ impl Address {
 
     pub fn has_rex2(&self) -> bool {
         self.exp.base.has_rex2() || self.exp.index.has_rex2()
+    }
+
+    /// Set the EVEX writemask on a memory operand, matching Xbyak's
+    /// `address | kN` operand modifier.
+    pub fn k(mut self, mask_idx: u8) -> Self {
+        assert!(mask_idx <= 7);
+        self.mask = mask_idx;
+        self
+    }
+
+    /// Preserve an explicitly requested zeroing modifier. Encoders reject it
+    /// where Xbyak rejects zeroing on a memory destination.
+    pub fn z(mut self) -> Self {
+        self.zero = true;
+        self
+    }
+
+    /// Return a copy with a different memory-size hint.
+    ///
+    /// Mirrors Xbyak 7.37 `Address::changeBit`.
+    pub fn change_bit(&self, bit: u16) -> Self {
+        let mut addr = *self;
+        addr.bit = bit;
+        addr
     }
 
     /// Set immediate size for this address context.
@@ -523,5 +547,22 @@ mod tests {
         assert_eq!(opt.get_base().get_idx(), 1);
         assert_eq!(opt.get_index().get_idx(), 1);
         assert_eq!(opt.get_scale(), 1);
+    }
+
+    #[test]
+    fn test_null_rip_address_is_plain_displacement() {
+        let addr = ptr(RegExp::rip_addr(0));
+        assert_eq!(addr.get_mode(), AddressMode::Rip);
+        assert_eq!(addr.get_disp(), 0);
+    }
+
+    #[test]
+    fn test_address_change_bit_preserves_expression() {
+        let byte = byte_ptr(RAX + 16);
+        let dword = byte.change_bit(32);
+        assert_eq!(byte.get_bit(), 8);
+        assert_eq!(dword.get_bit(), 32);
+        assert_eq!(dword.get_reg_exp().get_base(), &RAX);
+        assert_eq!(dword.get_disp(), 16);
     }
 }

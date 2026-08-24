@@ -85,6 +85,14 @@ method names with suffixes:
   sar(op, cl)                   sar_cl(op)
   bt(op, reg)                   bt(op, reg)
   bt(op, imm)                   bt_imm(op, imm)
+  adcx(d, reg, op)              adcx3(d, reg, op)
+  adox(d, reg, op)              adox3(d, reg, op)
+  bndmov(mem, bnd)              bndmov_store(mem, bnd)
+  ccmpcc(op, imm, dfv)          ccmpcc_imm(op, imm, dfv)
+  ctestcc(op, imm, dfv)         ctestcc_imm(op, imm, dfv)
+  cfcmovcc(d, reg, op)          cfcmovcc3(d, reg, op)
+  tcvtrow*(z, t, imm)           tcvtrow*_imm(z, t, imm)
+  tilemovrow(dst, src, imm)     tilemovrow_imm(dst, src, imm)
   shld(op, reg, imm)            shld(op, reg, imm)
   shld(op, reg, cl)             shld_cl(op, reg)
   pslld(xmm, xmm)              pslld(xmm, xmm)          [SSE register form]
@@ -113,8 +121,9 @@ x86 mnemonics that collide with Rust keywords get an underscore suffix:
   loop       loop_        Rust keyword (if ever added)
   mod        mod_         Rust keyword (if ever added)
 
-Additionally, movsd (string operation) is renamed to movsd_string() to
-avoid collision with the SSE movsd instruction which keeps the name movsd().
+Additionally, movsd and cmpsd string operations are renamed to
+movsd_string() and cmpsd_string() to avoid collisions with the SSE
+instructions, which retain the base mnemonic through their Rust APIs.
 
 
 6. FLAT Reg STRUCT INSTEAD OF CLASS HIERARCHY
@@ -174,6 +183,12 @@ Modifier methods return a modified copy of the register:
   .rounding(Rounding::*)    — set rounding mode
   .nf()                     — APX NF flag
   .zu()                     — APX ZU flag
+
+Memory operands use the same explicit modifier style for Xbyak's
+`address | kN` and `address | T_z` forms:
+
+  ptr(RAX.into()).k(1)
+  ptr(RAX.into()).k(1).z()
 
 Why: Rust's BitOr trait could work but requires a wrapper type for each
 modifier kind. Method chaining is clearer and provides type-safe access.
@@ -334,8 +349,6 @@ Why: A newtype prevents accidentally mixing TypeFlags with raw integers.
   supported; all operands must be explicit
 - Custom allocators: xbyak supports custom allocators via template
   parameter; rxbyak uses the platform module directly
-- cmpsd string operation: Missing (cmpsb/cmpsw/cmpsq exist, but cmpsd
-  string would conflict with SSE cmpsd, like movsd/movsd_string)
 
 
 18. PLATFORM ABSTRACTION
@@ -381,3 +394,432 @@ From trait implementations enable automatic conversion:
 Why: Rust has no implicit conversions. The Into trait pattern is the
 idiomatic equivalent, providing compile-time safety while keeping the
 API ergonomic.
+
+
+21. PARITY AUDIT BASELINE (2026-08-23)
+---------------------------------------
+Reference checkout:
+
+  Xbyak v7.40, commit 1230a6cedabdce6fe0246e5324232451f90ac300
+
+The checked-in tools/audit_xbyak.py script evaluates Xbyak's preprocessor
+surface for rxbyak's supported configuration (XBYAK64, AVX-512 enabled,
+optional omitted-operand overloads disabled) and reports:
+
+  Xbyak active 64-bit mnemonic names:           1879
+  Xbyak active 64-bit mnemonic overloads:        2439
+  rxbyak handwritten public instruction methods: 936
+  rxbyak generated/macro unique methods:         1162
+  Xbyak names matched after Rust API mapping:    1879
+  Xbyak names not matched:                          0
+    compatibility aliases with existing encoder:   0
+    missing encoder/API names:                      0
+
+The tool excludes the 32-bit-only branch instead of mixing it into the queue.
+It separately identifies direct Xbyak forwarders and known spelling aliases.
+All 178 such names now have public Rust wrappers: 160 SSE/AVX compare-predicate
+names, eight PCLMULQDQ names, six conditional-jump spellings, SAL, WAIT, PUSHFQ
+and POPFQ. All formerly unmatched names have now been classified and ported;
+operand-form and validation parity remain separate, family-by-family checks.
+Conversely, a matched name does not prove that every Xbyak overload or
+validation rule is present. Operand-form and byte-level parity must therefore
+still be reviewed family by family.
+
+The original rxbyak import was made while Xbyak v7.33.3 was current. Between
+v7.33.3 and v7.40, upstream added 39 unique mnemonic names and removed eight.
+The first synchronization slice has:
+
+  - ported prefetchrst2 and pushp/popp;
+  - ported the 10-15 byte NOP table and the new default NOP mode;
+  - aligned the complete prefetch family and its memory-size validation;
+  - removed the six retired Xeon Phi methods that rxbyak still exposed;
+  - ported Xbyak 7.39 reset ordering, including RX-to-RW restoration and
+    clearing pending relocation state before reusing a code buffer;
+  - ported the ACE 1.15 BSR0 register and bsrinit/bsrmovf/bsrmovh/bsrmovl;
+  - ported the ACE 1.15 tilemovcol and TOP2/TOP4 AMX instruction families;
+  - ported the ACE 1.15 FP8 conversion families, vpmovssdb and vunpackb;
+  - confirmed the emitted bytes directly against Xbyak v7.40.
+
+All 39 unique mnemonic names added between v7.33.3 and v7.40 now have rxbyak
+counterparts, and all eight names removed upstream are absent. The wider
+pre-v7.33.3 unmatched set still needs classification and operand-form review;
+this document no longer claims that the existing instruction list proves full
+Xbyak parity.
+
+The first non-mnemonic parity slice also ports Xbyak 7.35-7.37 behavior for a
+null RIP target (`RegExp(0)` is an integer displacement), bounds-checks the
+entire `CodeArray::rewrite` range, exposes `Address::changeBit`, and adds the
+previously absent `CodeGenerator::putSeg` counterpart. Segment-prefix tests use
+the exact byte sequence from Xbyak's upstream regression test.
+
+The Xbyak 7.39.1 EGPR review found that rxbyak's existing `vpextrw` method had
+the ModR/M operands reversed and accepted only a register destination. It now
+matches upstream's compact VEX path for low registers and its 0F3A path for
+memory or r16-r31 destinations. The same slice ports all five `vmovq` overload
+families and the four `opCvt3` scalar conversion families, retaining GPR kind
+through EVEX so B4 selects r16-r31 correctly. Tests assert bytes generated by
+Xbyak v7.40.
+
+The encoder-validation slice ports the Xbyak 7.35.4 `disp8*N` correction for
+`vcvt2ph2{b,h}f8[,s]` and `vcvthf82ph`, including the corrected F2/map flags.
+It also ports Xbyak 7.37.6's common `opVex` rejection of `{z}` when `T_M_K`
+marks a memory destination. Both behaviors have focused regression tests; the
+disp8 expected bytes were generated directly with Xbyak v7.40.
+
+The compatibility-alias slice reproduces Xbyak's 32-entry compare-predicate
+table and four-entry PCLMULQDQ table in rxbyak's existing build-time generator.
+Because Rust cannot overload the vector-result and opmask-result VCMP methods,
+the four base methods dispatch on the destination register kind; this also fixes
+the previous generator behavior that silently discarded the AVX-512 overloads
+as duplicate names. Exact bytes for VEX XMM/YMM and EVEX K/XMM/YMM/ZMM base
+forms were generated with Xbyak v7.40 and checked in as regressions. The tests
+also exercise every one of the 160 compare aliases; all 128 AVX aliases are
+checked with both vector and opmask destinations. All eight PCLMUL aliases are
+covered as well.
+
+The Xbyak 7.37.2 user-wait slice ports `tpause`, `umonitor`, and `umwait`.
+Unlike rxbyak's previously absent API, these use the shared register encoder,
+so r8-r31 receive REX/REX2 exactly as upstream intended. The regression test
+covers 16/32/64-bit `umonitor` and low/EGPR forms with Xbyak-generated bytes.
+
+Before porting Xbyak 7.38 `StackFrame`, its missing APX prerequisite was ported
+as a separate slice: the upstream-owned `evexLeg` and `opROO` helpers plus
+`push2`, `push2p`, `pop2`, and `pop2p`. Exact-byte tests cover ordinary
+callee-saved registers and r30/r31 with PPX hints against Xbyak v7.40.
+
+The following StackFrame slice ports the complete Xbyak v7.40 register and
+vector flag surface: UseRBP/RCX/RDX/RSI/RDI/R30R31,
+UseRBPAsFramePointer, UsePUSH2, UsePPX, UseSSE(n), UseAVX(n), and
+NoVzeroupper. Register-slot substitution, caller/callee-save accounting,
+prologue/epilogue ordering, stack alignment, APX paired pushes, vector flag
+validation, and the Win64 XMM6-15 save-area logic follow xbyak_util.h. The one
+intentional API difference remains section 11's explicit consuming close();
+close_with_ret(false) is the Rust counterpart of close(false).
+
+On Linux, a differential corpus compared all 9,052 prologue/epilogue byte
+sequences generated by rxbyak with Xbyak v7.40: 6,560 GPR/stack combinations,
+92 SSE/AVX combinations, and 2,400 APX stack combinations. Every sequence
+matched. Focused checked-in tests retain representative exact-byte cases and
+the upstream vector-flag rejection matrix. The Win64 path was reviewed
+line-by-line against the same source; it remains target-gated and requires a
+Windows test run for byte-level execution evidence.
+The Win64 implementation and tests type-check with
+`cargo check --target x86_64-pc-windows-gnu --tests`; the local environment
+does not provide the MinGW linker needed to execute or link that test target.
+
+The Cpu slice now follows Xbyak v7.40 through feature ID 101. It adds
+AMX_COMPLEX, ACE, AVX10_V1_AUX and AVX10_V2_AUX detection, tile-palette and
+ACE-version queries, the AVX10 auxiliary subleaf, and Xbyak's guarded 0x1e
+subleaf traversal. Feature constants retired by upstream (the Xeon Phi
+AVX-512 groups, PREFETCHWT1, and AMX_TRANSPOSE) are no longer exposed or set.
+The Apple on-demand AVX-512 rule and Intel cache SMT-width update also match
+the current C++ ordering. Public CPUID/XFEATURE helpers and fallible cache/core
+queries cover the Cpu API surface using Rust Result in place of Xbyak
+exceptions. A native differential probe compared all feature bits
+0-101, family/model fields, topology counts, every data-cache entry, and the
+three version/palette values with Xbyak v7.40; all values matched on the audit
+host. CpuTopology is covered by the subsequent structural/platform slices.
+
+CpuMask is now an owned topology type rather than a raw BTreeSet field. Its
+monotonic append contract, 0-1023 index range, inclusive ranges, strict list
+parser, iteration and canonical range serialization follow Xbyak. rxbyak uses
+the BTreeSet-backed implementation that upstream itself selects with
+XBYAK_CPUMASK_COMPACT=0 rather than reproducing the default 64-bit packed
+storage; no CpuMask bytes cross an ABI or serialization boundary. Rust Result
+reports the same invalid-index conditions that Xbyak reports by boolean return
+or exception. CpuTopology population is covered by the subsequent Linux and
+Windows slices.
+
+CpuTopology's common API and Linux population now follow Xbyak v7.40. The
+constructor derives hybrid state from Cpu and returns CantInitCpuTopology on
+failure; LogicalCpu/CpuCache expose the upstream sibling, cache and diagnostic
+helpers. Linux uses `_SC_NPROCESSORS_ONLN`, scans the same four cache indices,
+assigns the same sysfs fields, and restores the original affinity after the
+CPUID 0x1a hybrid-core fallback. A native differential probe compared the
+top-level counts/line size/hybrid flag and every logical CPU's core ID, core
+type, four cache size/associativity pairs and sharing masks; every value
+matched Xbyak v7.40 on the audit host. macOS remains intentionally unsupported
+because upstream also returns initialization failure there.
+
+The Windows topology slice now mirrors Xbyak's three
+GetLogicalProcessorInformationEx passes: RelationGroup builds the processor
+group accumulators, RelationProcessorCore assigns physical-core IDs and hybrid
+efficiency classes, and RelationCache populates the four cache slots and their
+sharing masks. The Rust parser validates each variable-sized relationship and
+its flexible arrays before dereferencing them; this is a memory-safe adaptation
+of Xbyak's pointer walk and does not alter accepted OS data. As in Xbyak's
+conservative build when NTDDI_VERSION is absent, cache relationships use the
+legacy single GroupMask. The implementation and its Windows-only contract test
+type-check with `cargo check --target x86_64-pc-windows-gnu --tests`. This audit
+host has neither Wine nor a MinGW linker, so native Windows runtime/differential
+execution remains pending and is not claimed as verified.
+
+The system/control-instruction slice ports 38 previously missing active
+mnemonic names from xbyak_mnemonic.h: CLZERO, CET indirect-branch markers,
+MONITOR/MWAIT variants, MSR/performance-counter access, SERIALIZE, SMAP,
+system-call entry/return, cache write-back, RTM, XGETBV/XLATB, load-address
+tracking, user interrupts, RDRAND/RDSEED, FSGSBASE, SENDUIPI, CLDEMOTE, CLWB,
+and MOVRS. Rust keeps Xbyak's generic Reg acceptance for RDRAND/RDSEED and
+MOVRS rather than imposing a narrower GPR-only policy. Representative
+low/extended/EGPR registers, complex addresses, every zero-operand byte string,
+and the MOVRS REX2 rejection were generated directly with Xbyak v7.40 and are
+checked in as exact-byte regressions.
+
+That comparison exposed a shared encoder divergence: rxbyak's memory-form REX
+path only emitted operand-size override for a 16-bit register when the memory
+operand had an explicit size. Xbyak emits 0x66 for an unsized memory operand as
+well. The p66 condition now follows xbyak.h::rex literally; MOVRS AX is the
+focused regression. CLFLUSH and CLFLUSHOPT also carry Xbyak's
+T_ALLOW_DIFF_SIZE flag again. No binary-layout-bearing type changes in this
+slice.
+
+The legacy-control slice ports IN/OUT and string OUTS, INT, RETF, LFS/LGS/LSS,
+LOOP/LOOPE/LOOPNE, JECXZ/JRCXZ, and APX JMPABS. `op_load_seg`, the port-I/O
+validation helpers, and the short-only label path remain in assembler/encoder
+ownership corresponding to xbyak.h rather than a generic instruction table.
+Rust represents C++ overloads as `in_`/`in_imm`, `out_`/`out_imm`, and
+`retf`/`retf_imm`; `loop_` escapes the Rust keyword. Existing Label handles are
+used instead of duplicating Xbyak's string-label overloads. Forward and
+backward branches, too-far binding, all legal accumulator widths, invalid port
+registers, low/extended/EGPR segment loads, and immediate byte order match
+Xbyak v7.40 differential output.
+
+The same re-read found that `ret_imm(0)` did not honor Xbyak's `if (imm)`
+selection and emitted C2 0000 rather than C3. Both RET and RETF immediate Rust
+entry points now select the no-immediate opcode for zero exactly as upstream.
+NASM intentionally encodes the textual `ret 0` as C2 0000, so that one case is
+covered by the Xbyak-specific regression rather than the NASM comparison set.
+No binary-layout-bearing type changes in this slice.
+
+The x87-state slice ports FBLD/FBSTP, FIDIVR/FISUBR, FLDENV, FNSAVE/FNSTENV,
+FRSTOR, FSAVE/FSTENV/FSTSW, FSINCOS, and FXRSTOR/FXRSTOR64. The new
+`fpu_mem_by_size` helper is the direct Rust counterpart of xbyak.h `opFpuMem`:
+it selects the escape byte from the Address width, applies the alternate m64
+extension, rejects unsized/unsupported memory, and preserves address-prefix
+ordering. Existing explicit-width x87 entry points remain available; the two
+new reverse-integer methods expose upstream's size-driven API. Rust keeps the
+AX-only FSTSW register contract as `fstsw_reg`, with `fstsw` owning the memory
+overload because Rust has no method overloading.
+
+Exact-byte regressions cover WAIT versus FN forms, low and extended complex
+addresses, the REX.W-only distinction of FXRSTOR64, invalid unsized integer
+memory, and the AX validation. Every expected sequence was generated with
+Xbyak v7.40. No binary-layout-bearing type changes in this slice.
+
+Before the MMX interoperability slice, the shared legacy-SSE encoder now ports
+xbyak.h `isValidSSE` ordering inside `opSSE`: after family-specific operand
+validation and before `opRO`, either operand being XMM16-XMM31 returns
+NotSupported. Both destination and source rejection paths were confirmed with
+a Xbyak v7.40 probe and are retained as focused regressions. Store helpers that
+do not route through `op_sse` are outside this helper-specific prerequisite and
+remain subject to their own operand-form audit. No binary-layout-bearing type
+changes in this slice.
+
+The MMX-interoperability slice ports CVTPD2PI/CVTPI2PD/CVTPI2PS/CVTPS2PI,
+CVTTPD2PI/CVTTPS2PI, MASKMOVDQU/MASKMOVQ, MOVDQ2Q/MOVQ2DQ, MOVNTQ, and
+PSHUFW. The three operand-family predicates remain direct counterparts of
+xbyak.h `isMMX_XMMorMEM`, `isXMM_MMXorMEM`, and `isXMMorMMX_MEM`; validation
+therefore occurs before the shared `op_sse` XMM16 check in the same order as
+upstream. Register, extended-register, complex-memory, immediate, invalid-kind,
+mixed MMX/XMM, and XMM16 cases match Xbyak v7.40 differential output.
+
+PSHUFW deliberately retains Xbyak's generic Mmx hierarchy behavior: matching
+XMM operands are accepted and use the unprefixed opcode, while mixed XMM/MMX
+operands are rejected. No binary-layout-bearing type changes in this slice.
+
+Before porting MOVBE/MOVDIRI/MOVDIR64B, `CodeBuffer::op_mr_alt` now mirrors the
+optional `type2`/`code2` branch of xbyak.h `opMR`. It invokes the existing
+upstream-owned `op_roo`/`evexLeg` path first and falls back to legacy `op_mr`
+only when no APX/REX2 state requires the alternate form. Rust makes `code2`
+explicit instead of representing Xbyak's internal NONE sentinel. A focused
+unit test compares the legacy r8d and APX r16d MOVDIRI encoder paths against
+Xbyak v7.40 bytes. The public consumers are included in the same warning-free
+commit after this prerequisite was independently verified.
+
+MOVBE load/store, MOVDIRI, MOVDIR64B, and MOVNTDQA now expose that behavior.
+Differential tests cover both MOVBE directions, legacy r8-r15 and APX r16-r31,
+MOVDIR64B's exact `cvt32` behavior, MOVNTDQA's XMM16 rejection, and Xbyak's
+otherwise permissive derived-register behavior. No binary-layout-bearing type
+changes in this slice.
+
+The scalar APX/BMI slice ports xbyak.h `opRRO` without collapsing its encoding
+choice: operand widths are checked first, W follows the destination, classic
+registers use VEX, and EGPR or destination-NF state uses `opROO`/EVEX-legacy.
+The RegMem `has_rex2` query intentionally excludes source NF/ZU, matching the
+exact narrower predicate used by Xbyak's helper. The pre-existing RORX, SHLX,
+SHRX, SARX, ANDN, BEXTR, BZHI, PDEP and PEXT methods now route through this
+helper too; this restores their APX/EGPR forms and ANDN/BEXTR/BZHI NF support.
+
+RAO-INT AADD/AAND/AOR/AXOR, ADCX/ADOX, BLSI/BLSMSK/BLSR and MULX are now
+public. Rust exposes Xbyak's overloaded three-operand ADCX/ADOX forms as
+`adcx3`/`adox3`; all methods remain in the mnemonic-owning assembler module.
+Exact-byte regressions generated with Xbyak v7.40 cover legacy, VEX, APX,
+EGPR, NF, register, memory, immediate and invalid-width paths. No
+binary-layout-bearing type changes in this slice.
+
+The Key Locker slice ports xbyak.h `opEncodeKey` and `opSSE_APX` in encoder
+ownership, then exposes all AESENC/AESDEC 128/256 and wide forms plus
+ENCODEKEY128/256. ENCODEKEY preserves Xbyak's exact threshold: r0-r7 use the
+legacy F3.0F38 opcode, while either operand at r8 or above selects the EVEX
+form. Key Locker AES uses legacy SSE for ordinary addresses and EVEX-legacy
+only when the address itself requires REX2.
+
+The post-port source re-read also preserves an unusual upstream consequence
+of `opSSE_APX` ordering: YMM/ZMM objects passed through Xbyak's Xmm base class
+are rejected on the legacy fallback, but are encoded when an EGPR address
+takes the APX branch before `isXMM_XMMorMEM` validation. Focused regressions
+cover that distinction, every public mnemonic, XMM16 rejection, both address
+paths and the four ENCODEKEY register thresholds. No binary-layout-bearing
+type changes in this slice.
+
+The MPX slice ports BND, BNDCL/BNDCN/BNDCU, BNDLDX/BNDSTX, BNDMK and both
+BNDMOV directions. Rust names the memory-destination overload
+`bndmov_store`; the load/register form retains `bndmov`. The encoder-owned
+`op_mib` counterpart enforces ModRM addressing and disables Xbyak's
+`[reg*2]` optimization exactly where MPX MIB requires the unmodified SIB.
+
+MPX register checks also use the `disableRex` branch of xbyak.h `opRext`:
+64-bit registers and explicitly sized m64 operands are converted to the
+32-bit encoding width before prefix selection. Differential bytes cover
+32/64-bit and extended registers, sized and unsized memory, BND-register
+moves, optimized versus non-optimized `[rax*2]`, and RIP rejection. No
+binary-layout-bearing type changes in this slice.
+
+The APX conditional slice ports xbyak.h `opCcmp`, `opCcmpi`, `opTesti` and
+`opCfcmov`, plus the 16 CMPccXADD wrappers that use `opRRO`. All 28 CCMP and
+28 CTEST spellings, all 16 CFCMOV conditions, and all 16 CMPccXADD conditions
+are present. Source macros mirror Xbyak's generated one-line wrappers and keep
+every spelling-to-selector/opcode mapping visible in assembler.rs; the audit
+tool inventories those expansions as generated public methods.
+
+Rust names immediate CCMP/CTEST overloads with `_imm` and three-operand
+CFCMOV overloads with `3`; `dfv` remains a signed explicit argument so invalid
+values still produce InvalidDfv rather than being excluded by the type system.
+Immediate width selection, unsized-memory rejection, operand bitwise-width
+selection, memory swapping, implicit NF placement, and validation order follow
+the upstream helpers literally. Differential tests cover full register,
+memory and immediate bytes, every selector/opcode table entry, invalid DFV,
+unsized memory, 8-bit rejection and width mismatch.
+
+The AMX FP8/row slice ports the four FP8 dot products, both complex FP16 dot
+products, TILELOADDRS/TILELOADDRST1, five TCVTROW families and both directions
+of TILEMOVROW. Immediate row-index overloads use `_imm`; TILEMOVROW dispatches
+the direction from the same TMM/ZMM operand classes that distinguish Xbyak's
+four overloads. Every public form has exact bytes generated by Xbyak v7.40.
+
+The prerequisite re-read found the older AMX memory methods bypassing
+xbyak.h `opAMX`. TILELOADD/TILELOADDT1/TILESTORED and tile-configuration access
+now share the direct counterpart: addresses are cloned without optimization,
+ordinary tile memory operations require both base and index, EGPR addresses
+select APX, and classic addresses use VEX with implicit TMM0. Existing AMX dot
+helpers now also restore the operand-class restriction supplied by Xbyak's
+Tmm signatures. Tests cover low/APX addresses, missing-index rejection, all
+new prefix/map/opcode combinations, both row directions and invalid classes.
+
+The vector move/blend slice ports VBLENDVPD/VBLENDVPS/VPBLENDVB, VLDMXCSR,
+VSTMXCSR, VMASKMOVDQU, both load/store forms of VMASKMOVPD/VMASKMOVPS,
+VMOVHLPS/VMOVLHPS, VMOVNTDQA, VCOMPRESSPD/VCOMPRESSPS, all three VMOVSH forms,
+VPABSQ and the four VMOVRS vector loads. Rust suffixes the memory-destination
+mask moves with `_store`, the two-operand default VMOVHLPS/VMOVLHPS forms with
+`_2`, and VMOVSH's memory overloads with `_load`/`_store`.
+
+This slice first restored the memory-operand state inherited from `Operand` by
+Xbyak's `Address`: rxbyak `Address` now preserves opmask and zero modifiers,
+selects EVEX when a memory mask is present, rejects memory masks unless the
+instruction carries `T_M_K`, rejects zeroing on a masked memory destination,
+and forwards the address mask into EVEX. This prerequisite is independently
+covered through the pre-existing VPMOVSSDB encoder. Exact-byte regressions for
+every newly exposed form were generated with Xbyak v7.40 and cover XMM, YMM,
+ZMM, extended registers, complex addresses, masked register destinations and
+masked memory destinations. No binary-layout-bearing type crosses an external
+ABI in this slice.
+
+The EVEX packed-integer slice ports both VPMASKMOVD/VPMASKMOVQ directions,
+VPCOMPRESSB/D/Q/W, VPMOVD2M/VPMOVW2M, all four VPMOVM2* expansions, and all
+15 previously missing truncating or signed/unsigned saturating VPMOV* forms.
+Memory-destination mask-move overloads use `_store`, consistently with the
+other Rust overload mappings. Each public wrapper keeps Xbyak's literal width,
+prefix, map, opcode and `opVmov` mode next to the mnemonic; only the exact
+upstream `opVmov` common flag assembly is shared by `vpmov_narrow_evex`.
+
+Differential regressions generated with Xbyak v7.40 cover every new mnemonic,
+both VPMASKMOV directions, vector/opmask conversions, masked register and
+memory destinations, and both `opVmov` width modes. Focused invalid-class and
+invalid-width cases retain the type constraints otherwise supplied by Xbyak's
+C++ parameter types. No binary-layout-bearing type changes in this slice.
+
+The packed shift/rotate/shuffle slice ports VPSLLDQ/VPSRLDQ, VPROLD/VPROLQ,
+VPRORD/VPRORQ and the four VSHUF* cross-lane forms. The shared
+`vex_vector_shift_imm` helper preserves Xbyak's non-obvious operand ownership:
+the opcode extension occupies ModRM.reg, the architectural destination is in
+VEX/EVEX.vvvv, and the explicit source remains ModRM.r/m. Its synthetic
+extension register also uses the destination's XMM/YMM/ZMM kind exactly like
+`Xmm(x.getKind(), extension)` upstream.
+
+The VSHUF* wrappers retain Xbyak's Ymm parameter boundary, accepting YMM/ZMM
+but rejecting XMM before the common AVX encoder. Exact Xbyak v7.40 bytes cover
+all ten new names, all three vector widths where relevant, high registers and
+both W/element-size families. No binary-layout-bearing type changes.
+
+The scalar conversion slice ports signed and unsigned VCVT/VCVTT SD/SS-to-SI,
+all SH-to-SI/USI variants, and signed/unsigned integer-to-SH conversion. The
+signed SD/SS helpers deliberately synthesize `Xmm(dst.getIdx())` before
+calling the AVX helper, matching Xbyak's encoding ownership and its treatment
+of extended GPR indices. Unsigned and half-input conversions keep the actual
+GPR as EVEX ModRM.reg, exactly as their upstream `opVex` bodies do.
+
+The integer-to-half helper preserves Xbyak's explicit 32/64-bit source-size
+validation, W/tuple choice, `T_M_K` placement and XMM-only merge operands.
+Exact-byte regressions generated with Xbyak v7.40 cover every mnemonic, 32-
+and 64-bit destinations/sources and EGPR encodings; unsized memory rejection
+is retained as a focused validation test. No binary-layout-bearing changes.
+
+The AVX_NE_CONVERT slice ports VBCSTNEBF162PS/VBCSTNESH2PS and all four
+even/odd BF16/FP16-to-PS conversions. Their shared helper contains only the
+literal upstream common map, W and vector-width flags; each public method
+retains its own prefix, opcode and broadcast capability. These instructions
+do not opt into EVEX upstream, so XMM16-XMM31 continue to fail with
+EvexIsInvalid rather than silently selecting another encoding.
+
+Exact Xbyak v7.40 bytes cover all six names with XMM/YMM and extended legacy
+registers, and a focused high-register test preserves the non-EVEX limit. No
+binary-layout-bearing type changes.
+
+The gather/scatter slice ports xbyak.h `opGather`, `checkGather2`, `opGather2`
+and `opGatherFetch` before exposing all 32 remaining mnemonic names. Legacy
+AVX2 three-operand gather overloads use the `_avx2` suffix; the unsuffixed
+names own the EVEX masked forms. All packed/FP gathers, packed/FP scatters and
+PF0/PF1 gather/scatter prefetch variants retain their literal tuple, W, VSIB,
+mask-location, opcode and vector-width mode values from xbyak_mnemonic.h.
+
+The helper port preserves legacy XMM/YMM index matrices, three-way distinct
+register checks, EVEX XMM/YMM/ZMM index/value matrices, zeroing rejection,
+K0 rejection, gather destination/index alias rejection, scatter memory-mask
+selection, and the exact YMM-versus-ZMM prefetch-index contracts. Differential
+tests generated with Xbyak v7.40 cover all 40 Rust overload entry points and
+all 32 names, including high VSIB indices and scaled displacement encoding.
+Focused error tests cover every validation family. No binary-layout-bearing
+type changes.
+
+The final overloaded-string slice exposes Xbyak's zero-operand CMPSD as
+`cmpsd_string`, matching the existing `movsd_string` Rust overload convention
+while leaving the SSE comparison API distinct. Its single A7 byte is covered
+by the string-operation conformance test. No binary-layout-bearing type
+changes.
+
+The VPERMIL overload slice fixes a limitation of the name-only audit: Xbyak
+defines both variable-control and immediate-control VPERMILPS/VPERMILPD forms,
+but the Rust generator previously discarded the later immediate entries as
+duplicate method names. The immediate overloads now use the explicit
+`vpermilps_imm` and `vpermilpd_imm` Rust suffix convention. Exact XMM, YMM,
+ZMM, opmask and zeroing bytes were generated with Xbyak v7.40; the original
+three-operand variable-control methods remain covered separately. No
+binary-layout-bearing type changes.
+
+The packed-qword shift follow-up ports Xbyak's immediate-control VPSRLQ
+overload as `vpsrlq_imm`, complementing the existing variable-count
+`vpsrlq` and immediate `vpsllq_imm` entry points. The helper retains Xbyak's
+literal `/2`, `T_66|T_0F|T_EW1|T_YMM|T_EVEX|T_B64|T_MEM_EVEX`, opcode
+`0x73`, and destination-in-VEX.vvvv ownership. Exact XMM, YMM, ZMM and high
+register bytes were generated directly with Xbyak v7.40 and are also checked
+against NASM. No binary-layout-bearing type changes.

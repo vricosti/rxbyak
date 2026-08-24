@@ -114,6 +114,15 @@ fn test_zeroing_without_mask() {
     assert!(result.is_ok(), "zeroing without mask is silently ignored");
 }
 
+#[test]
+fn test_zeroing_is_rejected_for_memory_destination() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(
+        asm.vpmovssdb(dword_ptr(RAX.into()), ZMM2.k(1).z()),
+        Err(Error::InvalidZero)
+    );
+}
+
 // ─── Label errors ───────────────────────────────────────────────
 
 #[test]
@@ -192,6 +201,13 @@ fn test_valid_evex_masks() {
     for k in 1u8..=7 {
         asm.vaddps(ZMM0.k(k), ZMM1, ZMM2).unwrap();
     }
+}
+
+#[test]
+fn test_legacy_sse_rejects_xmm16_like_xbyak() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(asm.addps(XMM16, XMM1), Err(Error::NotSupported));
+    assert_eq!(asm.addps(XMM1, XMM16), Err(Error::NotSupported));
 }
 
 #[test]

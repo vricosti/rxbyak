@@ -771,12 +771,12 @@ pub static AVX_X_XM: &[Insn] = &[
     Insn::vex_xm("vrsqrtps", T_0F | T_YMM, 0x52),
     // permilps/pd imm form
     Insn::vex_xm_imm(
-        "vpermilps",
+        "vpermilps_imm",
         T_0F3A | T_66 | T_W0 | T_YMM | T_EVEX | T_EW0 | T_B32,
         0x04,
     ),
     Insn::vex_xm_imm(
-        "vpermilpd",
+        "vpermilpd_imm",
         T_0F3A | T_66 | T_W0 | T_YMM | T_EVEX | T_EW1 | T_B64,
         0x05,
     ),

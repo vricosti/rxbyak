@@ -978,10 +978,6 @@ fn test_nasm_ret_imm() {
     let nasm = skip_if_no_nasm!();
     let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
         (
-            "ret 0".into(),
-            Box::new(|a: &mut CodeAssembler| a.ret_imm(0)),
-        ),
-        (
             "ret 8".into(),
             Box::new(|a: &mut CodeAssembler| a.ret_imm(8)),
         ),

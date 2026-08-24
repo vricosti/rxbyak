@@ -113,50 +113,48 @@ fn test_reg_mapping_p2_t2() {
     sf.close(&mut asm).unwrap();
 }
 
-// ─── USE_RCX / USE_RDX register mapping tests ───────────────────────
+// ─── Reserved-register mapping tests ───────────────────────────────
 
 #[test]
-fn test_use_rcx_skips_rcx_in_mapping() {
+fn test_use_rcx_maps_parameter_to_r10() {
     let mut asm = CodeAssembler::new(4096).unwrap();
     let sf = StackFrame::new(&mut asm, 4, 0 | USE_RCX, 0).unwrap();
     #[cfg(not(target_os = "windows"))]
     {
-        // Linux order: RDI, RSI, RDX, [RCX skipped], R8, R9, R10, R11, ...
+        // A reserved parameter register is represented by its dedicated
+        // alternate slot; later parameters are not shifted.
         assert_eq!(sf.p[0], RDI);
         assert_eq!(sf.p[1], RSI);
         assert_eq!(sf.p[2], RDX);
-        assert_eq!(sf.p[3], R8); // RCX skipped
+        assert_eq!(sf.p[3], R10);
     }
     #[cfg(target_os = "windows")]
     {
-        // Windows order: [RCX skipped], RDX, R8, R9, R10, R11, ...
-        assert_eq!(sf.p[0], RDX);
-        assert_eq!(sf.p[1], R8);
-        assert_eq!(sf.p[2], R9);
-        assert_eq!(sf.p[3], R10);
+        assert_eq!(sf.p[0], R10);
+        assert_eq!(sf.p[1], RDX);
+        assert_eq!(sf.p[2], R8);
+        assert_eq!(sf.p[3], R9);
     }
     sf.close(&mut asm).unwrap();
 }
 
 #[test]
-fn test_use_rdx_skips_rdx_in_mapping() {
+fn test_use_rdx_maps_parameter_to_r11() {
     let mut asm = CodeAssembler::new(4096).unwrap();
     let sf = StackFrame::new(&mut asm, 4, 0 | USE_RDX, 0).unwrap();
     #[cfg(not(target_os = "windows"))]
     {
-        // Linux order: RDI, RSI, [RDX skipped], RCX, R8, R9, ...
         assert_eq!(sf.p[0], RDI);
         assert_eq!(sf.p[1], RSI);
-        assert_eq!(sf.p[2], RCX); // RDX skipped
-        assert_eq!(sf.p[3], R8);
+        assert_eq!(sf.p[2], R11);
+        assert_eq!(sf.p[3], RCX);
     }
     #[cfg(target_os = "windows")]
     {
-        // Windows order: RCX, [RDX skipped], R8, R9, R10, ...
         assert_eq!(sf.p[0], RCX);
-        assert_eq!(sf.p[1], R8);
-        assert_eq!(sf.p[2], R9);
-        assert_eq!(sf.p[3], R10);
+        assert_eq!(sf.p[1], R11);
+        assert_eq!(sf.p[2], R8);
+        assert_eq!(sf.p[3], R9);
     }
     sf.close(&mut asm).unwrap();
 }
@@ -167,21 +165,32 @@ fn test_use_rcx_rdx_together() {
     let sf = StackFrame::new(&mut asm, 4, 0 | USE_RCX | USE_RDX, 0).unwrap();
     #[cfg(not(target_os = "windows"))]
     {
-        // Linux: RDI, RSI, [RDX skip], [RCX skip], R8, R9, R10, R11, ...
         assert_eq!(sf.p[0], RDI);
         assert_eq!(sf.p[1], RSI);
-        assert_eq!(sf.p[2], R8);
-        assert_eq!(sf.p[3], R9);
+        assert_eq!(sf.p[2], R11);
+        assert_eq!(sf.p[3], R10);
     }
     #[cfg(target_os = "windows")]
     {
-        // Windows: [RCX skip], [RDX skip], R8, R9, R10, R11, ...
-        assert_eq!(sf.p[0], R8);
-        assert_eq!(sf.p[1], R9);
-        assert_eq!(sf.p[2], R10);
-        assert_eq!(sf.p[3], R11);
+        assert_eq!(sf.p[0], R10);
+        assert_eq!(sf.p[1], R11);
+        assert_eq!(sf.p[2], R8);
+        assert_eq!(sf.p[3], R9);
     }
     sf.close(&mut asm).unwrap();
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn test_use_rdi_rsi_use_upstream_backup_registers() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    let sf = StackFrame::new(&mut asm, 4, USE_RDI | USE_RSI, 0).unwrap();
+    assert_eq!(sf.p[0], R8);
+    assert_eq!(sf.p[1], R9);
+    assert_eq!(sf.p[2], RDX);
+    assert_eq!(sf.p[3], RCX);
+    sf.close(&mut asm).unwrap();
+    assert_eq!(asm.code(), [0x49, 0x89, 0xF8, 0x49, 0x89, 0xF1, 0xC3]);
 }
 
 // ─── Error handling tests ────────────────────────────────────────────
@@ -236,6 +245,78 @@ fn test_use_rcx_rdx_causes_overflow() {
     assert_eq!(
         StackFrame::new(&mut asm, 4, 9 | USE_RCX | USE_RDX, 0).unwrap_err(),
         Error::BadTnum
+    );
+}
+
+#[test]
+fn test_vector_flag_validation_matches_upstream() {
+    for flags in [
+        use_sse(1) | use_avx(1),
+        use_sse(17),
+        use_sse(3) | NO_VZEROUPPER,
+        NO_VZEROUPPER,
+        use_avx(33),
+    ] {
+        let mut asm = CodeAssembler::new(4096).unwrap();
+        assert_eq!(
+            StackFrame::new(&mut asm, 0, flags, 0).unwrap_err(),
+            Error::BadTnum
+        );
+    }
+
+    for flags in [use_sse(16), use_avx(32), use_avx(8) | NO_VZEROUPPER] {
+        let mut asm = CodeAssembler::new(4096).unwrap();
+        StackFrame::new(&mut asm, 0, flags, 0)
+            .unwrap()
+            .close(&mut asm)
+            .unwrap();
+    }
+}
+
+#[test]
+fn test_manual_close_can_omit_ret() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    StackFrame::new(&mut asm, 0, 0, 0)
+        .unwrap()
+        .close_with_ret(&mut asm, false)
+        .unwrap();
+    assert!(asm.code().is_empty());
+}
+
+#[test]
+fn test_frame_pointer_prologue_matches_upstream() {
+    assert_eq!(
+        assemble_sf_no_body(0, USE_RBP_AS_FRAME_POINTER, 16),
+        [
+            0x55, // push rbp
+            0x48, 0x89, 0xE5, // mov rbp, rsp
+            0x48, 0x83, 0xEC, 0x10, // sub rsp, 16
+            0x48, 0x83, 0xC4, 0x10, // add rsp, 16
+            0x5D, // pop rbp
+            0xC3,
+        ]
+    );
+}
+
+#[test]
+fn test_rbp_ppx_pair_matches_upstream() {
+    assert_eq!(
+        assemble_sf_no_body(0, USE_RBP | USE_PPX, 0),
+        [0xD5, 0x08, 0x55, 0xD5, 0x08, 0x5D, 0xC3]
+    );
+}
+
+#[test]
+fn test_apx_explicit_register_frame_matches_upstream() {
+    assert_eq!(
+        assemble_sf_no_body(0, USE_RBP | USE_R30_R31 | USE_PUSH2 | USE_PPX, 0),
+        [
+            0xD5, 0x08, 0x55, // pushp rbp
+            0x62, 0xDC, 0x8C, 0x10, 0xFF, 0xF7, // push2p r30, r31
+            0x62, 0xDC, 0x84, 0x10, 0x8F, 0xC6, // pop2p r31, r30
+            0xD5, 0x08, 0x5D, // popp rbp
+            0xC3,
+        ]
     );
 }
 
@@ -390,7 +471,7 @@ mod sysv_encoding {
 
     #[test]
     fn test_use_rcx_emits_mov_r10_rcx() {
-        // pNum=4, USE_RCX → RCX_POS(3) < pNum(4), so emit mov r10, rcx
+        // RCX occupies parameter slot 3, so preserve it in R10.
         let code = assemble_sf_no_body(4, USE_RCX, 0);
         assert_eq!(
             code,
@@ -403,7 +484,7 @@ mod sysv_encoding {
 
     #[test]
     fn test_use_rdx_emits_mov_r11_rdx() {
-        // pNum=4, USE_RDX → RDX_POS(2) < pNum(4), so emit mov r11, rdx
+        // RDX occupies parameter slot 2, so preserve it in R11.
         let code = assemble_sf_no_body(4, USE_RDX, 0);
         assert_eq!(
             code,
@@ -428,15 +509,42 @@ mod sysv_encoding {
     }
 
     #[test]
+    fn test_push2_callee_saves_match_upstream() {
+        assert_eq!(
+            assemble_sf_no_body(4, 7 | USE_PUSH2, 0),
+            [
+                0x53, // push rbx while rsp is not 16-byte aligned
+                0x62, 0xD4, 0x54, 0x18, 0xFF, 0xF4, // push2 rbp, r12
+                0x62, 0xF4, 0x1C, 0x18, 0x8F, 0xC5, // pop2 r12, rbp
+                0x5B, // pop rbx
+                0xC3,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_vector_epilogues_match_upstream() {
+        assert_eq!(assemble_sf_no_body(0, use_sse(8), 0), [0xC3]);
+        assert_eq!(
+            assemble_sf_no_body(0, use_avx(8), 0),
+            [0xC5, 0xF8, 0x77, 0xC3]
+        );
+        assert_eq!(
+            assemble_sf_no_body(0, use_avx(8) | NO_VZEROUPPER, 0),
+            [0xC3]
+        );
+    }
+
+    #[test]
     fn test_use_rcx_no_mov_when_rcx_not_param() {
-        // pNum=2, USE_RCX → RCX_POS(3) >= pNum(2), no mov needed
+        // RCX's parameter slot 3 is outside pNum=2, so no move is needed.
         let code = assemble_sf_no_body(2, USE_RCX, 0);
         assert_eq!(code, [0xC3]); // just ret
     }
 
     #[test]
     fn test_use_rdx_no_mov_when_rdx_not_param() {
-        // pNum=1, USE_RDX → RDX_POS(2) >= pNum(1), no mov needed
+        // RDX's parameter slot 2 is outside pNum=1, so no move is needed.
         let code = assemble_sf_no_body(1, USE_RDX, 0);
         assert_eq!(code, [0xC3]); // just ret
     }
@@ -601,7 +709,7 @@ mod win64_encoding {
 
     #[test]
     fn test_use_rcx_emits_mov_r10_rcx() {
-        // Windows: RCX_POS=0, pNum=4 → 0 < 4 → emit mov r10, rcx
+        // Windows RCX parameter slot 0 is live, so preserve it in R10.
         let code = assemble_sf_no_body(4, USE_RCX, 0);
         assert_eq!(
             code,
@@ -614,7 +722,7 @@ mod win64_encoding {
 
     #[test]
     fn test_use_rdx_emits_mov_r11_rdx() {
-        // Windows: RDX_POS=1, pNum=4 → 1 < 4 → emit mov r11, rdx
+        // Windows RDX parameter slot 1 is live, so preserve it in R11.
         let code = assemble_sf_no_body(4, USE_RDX, 0);
         assert_eq!(
             code,
@@ -627,7 +735,7 @@ mod win64_encoding {
 
     #[test]
     fn test_use_rcx_no_mov_when_not_param() {
-        // Windows: RCX_POS=0, pNum=0 → 0 >= 0 → no mov
+        // Windows RCX parameter slot 0 is outside pNum=0.
         let code = assemble_sf_no_body(0, USE_RCX, 0);
         assert_eq!(code, [0xC3]);
     }
@@ -910,7 +1018,7 @@ mod execution {
     #[test]
     fn test_exec_use_rcx_linux() {
         let mut asm = CodeAssembler::new(4096).unwrap();
-        // Linux: RCX is param[3] (RCX_POS=3), saved to R10
+        // Linux: RCX is parameter slot 3, saved to R10.
         let sf = StackFrame::new(&mut asm, 4, USE_RCX, 0).unwrap();
         asm.mov(RAX, sf.p[0]).unwrap();
         asm.add(RAX, R10).unwrap(); // R10 has original 4th param
@@ -925,13 +1033,11 @@ mod execution {
     #[test]
     fn test_exec_use_rcx_windows() {
         let mut asm = CodeAssembler::new(4096).unwrap();
-        // Windows: RCX is param[0] (RCX_POS=0), saved to R10
-        // With USE_RCX: p[0]=RDX(param1), p[1]=R8(param2), p[2]=R9(param3), p[3]=R10
-        // After mov r10, rcx: R10 has original param[0]
+        // Windows: RCX is parameter slot 0, represented by its R10 backup.
         let sf = StackFrame::new(&mut asm, 4, USE_RCX, 0).unwrap();
-        // Return R10 (original param0) + p[0] (which is RDX = param1)
-        asm.mov(RAX, R10).unwrap();
-        asm.add(RAX, sf.p[0]).unwrap();
+        // Return p[0] (R10, original param0) + p[1] (RDX, original param1).
+        asm.mov(RAX, sf.p[0]).unwrap();
+        asm.add(RAX, sf.p[1]).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
         let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.get_code() };
@@ -1011,7 +1117,7 @@ mod gen_patterns {
     fn test_gen5_use_rcx_with_temps() {
         // pNum=4, tNum=2|USE_RCX, stack=0
         // allRegNum = 4 + 2 + 1 = 7, saveNum = 0
-        // RCX_POS=3 < pNum=4 → mov r10, rcx
+        // RCX parameter slot 3 is live, so the prologue emits mov r10, rcx.
         let code = assemble_sf_no_body(4, 2 | USE_RCX, 0);
         assert_eq!(
             code,

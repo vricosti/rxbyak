@@ -36,6 +36,11 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
 }
 
 /// Free executable memory.
+///
+/// # Safety
+///
+/// `ptr` and `size` must describe a live allocation previously returned by
+/// [`alloc_exec_mem`], and the allocation must not be used after this call.
 pub unsafe fn free_exec_mem(ptr: *mut u8, size: usize) -> Result<()> {
     #[cfg(unix)]
     {
@@ -52,6 +57,10 @@ pub unsafe fn free_exec_mem(ptr: *mut u8, size: usize) -> Result<()> {
 }
 
 /// Change memory protection.
+///
+/// # Safety
+///
+/// `ptr` and `size` must describe a live mapped allocation for the full range.
 pub unsafe fn protect(ptr: *mut u8, size: usize, mode: ProtectMode) -> Result<()> {
     #[cfg(unix)]
     {

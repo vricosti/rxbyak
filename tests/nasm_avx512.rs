@@ -113,6 +113,22 @@ fn test_nasm_packed_qword_immediate_shifts() {
             Box::new(|a| a.vpsllq_imm(ZMM29, ZMM30, 32)),
         ),
         (
+            "vpsrlq xmm3, xmm4, 7".into(),
+            Box::new(|a| a.vpsrlq_imm(XMM3, XMM4, 7)),
+        ),
+        (
+            "vpsrlq xmm11, xmm12, 7".into(),
+            Box::new(|a| a.vpsrlq_imm(XMM11, XMM12, 7)),
+        ),
+        (
+            "vpsrlq ymm17, ymm18, 31".into(),
+            Box::new(|a| a.vpsrlq_imm(YMM17, YMM18, 31)),
+        ),
+        (
+            "vpsrlq zmm29, zmm30, 32".into(),
+            Box::new(|a| a.vpsrlq_imm(ZMM29, ZMM30, 32)),
+        ),
+        (
             "vpsraq xmm5, xmm6, 32".into(),
             Box::new(|a| a.vpsraq_imm(XMM5, XMM6, 32)),
         ),

@@ -3,13 +3,108 @@ use crate::code_array::{AllocMode, CodeBuffer, LabelMode};
 use crate::encoding_flags::TypeFlags;
 use crate::error::{Error, Result};
 use crate::label::{JmpLabel, JmpType, Label, LabelId, LabelManager};
-use crate::operand::{Reg, RegMem, RegMemImm};
+use crate::operand::{Reg, RegMem, RegMemImm, Segment};
 
 /// The main assembler struct. Users create an instance, emit instructions,
 /// then call `ready()` to finalize and obtain executable code.
 pub struct CodeAssembler {
     pub(crate) buf: CodeBuffer,
     label_mgr: LabelManager,
+}
+
+macro_rules! define_ccmp_methods {
+    ($( $name:ident, $imm_name:ident => $sc:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(
+                &mut self,
+                op1: impl Into<RegMem>,
+                op2: impl Into<RegMem>,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_ccmp(op1.into(), op2.into(), dfv, 0x38, $sc)
+            }
+
+            #[inline]
+            pub fn $imm_name(
+                &mut self,
+                op: impl Into<RegMem>,
+                imm: i32,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_ccmpi(op.into(), imm, dfv, $sc)
+            }
+        )*
+    };
+}
+
+macro_rules! define_ctest_methods {
+    ($( $name:ident, $imm_name:ident => $sc:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(
+                &mut self,
+                op: impl Into<RegMem>,
+                reg: Reg,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_ccmp(op.into(), RegMem::Reg(reg), dfv, 0x84, $sc)
+            }
+
+            #[inline]
+            pub fn $imm_name(
+                &mut self,
+                op: impl Into<RegMem>,
+                imm: i32,
+                dfv: i32,
+            ) -> Result<()> {
+                self.op_testi(op.into(), imm, dfv, $sc)
+            }
+        )*
+    };
+}
+
+macro_rules! define_cfcmov_methods {
+    ($( $name:ident, $name3:ident => $opcode:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(
+                &mut self,
+                op1: impl Into<RegMem>,
+                op2: impl Into<RegMem>,
+            ) -> Result<()> {
+                self.op_cfcmov(Reg::default(), op1.into(), op2.into(), $opcode)
+            }
+
+            #[inline]
+            pub fn $name3(
+                &mut self,
+                dst: Reg,
+                reg: Reg,
+                op: impl Into<RegMem>,
+            ) -> Result<()> {
+                self.op_cfcmov(dst.nf(), op.into(), RegMem::Reg(reg), $opcode)
+            }
+        )*
+    };
+}
+
+macro_rules! define_cmpccxadd_methods {
+    ($( $name:ident => $opcode:expr; )*) => {
+        $(
+            #[inline]
+            pub fn $name(&mut self, addr: Address, reg1: Reg, reg2: Reg) -> Result<()> {
+                self.bmi_op_rro(
+                    reg1,
+                    reg2,
+                    RegMem::Mem(addr),
+                    TypeFlags::T_APX | TypeFlags::T_66 | TypeFlags::T_0F38,
+                    $opcode,
+                    None,
+                )
+            }
+        )*
+    };
 }
 
 impl CodeAssembler {
@@ -56,6 +151,16 @@ impl CodeAssembler {
     /// Reset the code size to zero (for re-generating code in the same buffer).
     pub fn reset_size(&mut self) {
         self.buf.reset_size();
+    }
+
+    /// Reset emitted code and all labels, preserving the allocated buffer.
+    ///
+    /// If `ready()` made an owned buffer read-execute, restore read-write
+    /// protection after resetting the state, matching Xbyak 7.39 ordering.
+    pub fn reset(&mut self) -> Result<()> {
+        self.buf.reset_size();
+        self.label_mgr.reset();
+        self.buf.restore_writable_after_reset()
     }
 
     /// Set the code size to a specific value.
@@ -145,14 +250,37 @@ impl CodeAssembler {
         self.buf.dq(v)
     }
 
-    /// Align the code to a boundary by emitting NOP bytes (0x90).
+    /// Emit a segment-override prefix.
+    ///
+    /// Mirrors Xbyak `CodeGenerator::putSeg`.
+    #[inline]
+    pub fn put_seg(&mut self, segment: Segment) -> Result<()> {
+        self.buf.db(segment.prefix())
+    }
+
+    /// Align the code to a boundary using Xbyak's preferred multi-byte NOPs.
     #[inline]
     pub fn align(&mut self, n: usize) -> Result<()> {
+        self.align_with_nop_mode(n, 2)
+    }
+
+    /// Align the code to a boundary using Xbyak's `useMultiByteNop` mode.
+    ///
+    /// `0` emits only `0x90`, `1` uses the recommended sequences up to nine
+    /// bytes, and `2` also uses the AMD Zen 4 sequences up to fifteen bytes.
+    #[inline]
+    pub fn align_with_nop_mode(&mut self, n: usize, use_multi_byte_nop: u8) -> Result<()> {
         if n == 0 || (n & (n - 1)) != 0 {
-            return Err(Error::BadParameter);
+            return Err(Error::BadAlign);
         }
-        while !self.buf.size().is_multiple_of(n) {
-            self.buf.db(0x90)?;
+        if self.buf.alloc_mode() == AllocMode::AutoGrow
+            && !crate::platform::page_size().is_multiple_of(n)
+        {
+            return Err(Error::BadAlign);
+        }
+        let remain = self.buf.cur() as usize % n;
+        if remain != 0 {
+            self.nop_bytes(n - remain, use_multi_byte_nop)?;
         }
         Ok(())
     }
@@ -187,9 +315,9 @@ impl CodeAssembler {
             } else if mode == LabelMode::Abs {
                 // Absolute address: top + label_offset
                 let addr = self.buf.top() as u64 + offset as u64;
-                self.buf.rewrite(patch_offset, addr, size as usize);
+                self.buf.rewrite(patch_offset, addr, size as usize)?;
             } else {
-                self.buf.rewrite(patch_offset, disp, size as usize);
+                self.buf.rewrite(patch_offset, disp, size as usize)?;
             }
         }
         Ok(())
@@ -263,6 +391,91 @@ impl CodeAssembler {
         Ok(())
     }
 
+    /// Emit an instruction whose only form is an 8-bit relative label branch.
+    /// This is the short-only path of Xbyak `opJmp` used by LOOP/JECXZ.
+    fn short_label_jump(&mut self, label: &Label, opcode: u8) -> Result<()> {
+        self.buf.db(opcode)?;
+        if let Some(offset) = self.label_mgr.get_offset(label) {
+            let displacement = offset as i64 - self.buf.size() as i64 - 1;
+            if !(-128..=127).contains(&displacement) {
+                return Err(Error::LabelIsTooFar);
+            }
+            self.buf.db(displacement as u8)
+        } else {
+            self.buf.db(0)?;
+            self.label_mgr.add_undef(
+                label.id(),
+                JmpLabel {
+                    end_of_jmp: self.buf.size(),
+                    jmp_size: 1,
+                    mode: LabelMode::AsIs,
+                    disp: 0,
+                },
+            );
+            Ok(())
+        }
+    }
+
+    /// Xbyak `opInOut(const Reg&, const Reg&, uint8_t)`.
+    fn op_in_out_reg(&mut self, accumulator: Reg, port: Reg, code: u8) -> Result<()> {
+        if accumulator.get_idx() == 0 && port.get_idx() == 2 && port.is_bit(16) {
+            return match accumulator.get_bit() {
+                8 => self.buf.db(code),
+                16 => {
+                    self.buf.db(0x66)?;
+                    self.buf.db(code + 1)
+                }
+                32 => self.buf.db(code + 1),
+                _ => Err(Error::BadCombination),
+            };
+        }
+        Err(Error::BadCombination)
+    }
+
+    /// Xbyak `opInOut(const Reg&, uint8_t, uint8_t)`.
+    fn op_in_out_imm(&mut self, accumulator: Reg, code: u8, port: u8) -> Result<()> {
+        if accumulator.get_idx() == 0 {
+            return match accumulator.get_bit() {
+                8 => {
+                    self.buf.db(code)?;
+                    self.buf.db(port)
+                }
+                16 => {
+                    self.buf.db(0x66)?;
+                    self.buf.db(code + 1)?;
+                    self.buf.db(port)
+                }
+                32 => {
+                    self.buf.db(code + 1)?;
+                    self.buf.db(port)
+                }
+                _ => Err(Error::BadCombination),
+            };
+        }
+        Err(Error::BadCombination)
+    }
+
+    /// Xbyak `isMMX_XMMorMEM`.
+    fn is_mmx_xmm_or_mem(dst: Reg, src: &RegMem) -> bool {
+        dst.is_mmx()
+            && (matches!(src, RegMem::Mem(_)) || matches!(src, RegMem::Reg(reg) if reg.is_xmm()))
+    }
+
+    /// Xbyak `isXMM_MMXorMEM`.
+    fn is_xmm_mmx_or_mem(dst: Reg, src: &RegMem) -> bool {
+        dst.is_xmm()
+            && (matches!(src, RegMem::Mem(_)) || matches!(src, RegMem::Reg(reg) if reg.is_mmx()))
+    }
+
+    /// Xbyak `isXMMorMMX_MEM`.
+    fn is_matching_mmx_or_xmm_mem(dst: Reg, src: &RegMem) -> bool {
+        (dst.is_mmx()
+            && (matches!(src, RegMem::Mem(_)) || matches!(src, RegMem::Reg(reg) if reg.is_mmx())))
+            || (dst.is_xmm()
+                && (matches!(src, RegMem::Mem(_))
+                    || matches!(src, RegMem::Reg(reg) if reg.is_xmm())))
+    }
+
     /// Get immediate bit size for arithmetic operations.
     fn get_imm_bit(reg_bit: u16, imm: i64) -> u8 {
         if reg_bit == 8 {
@@ -279,10 +492,63 @@ impl CodeAssembler {
 
     // ─── x86 Instructions (manually implemented) ───────────────
 
-    /// `nop` — No operation.
+    /// `nop` — Emit Xbyak's default one-byte no-op.
     #[inline]
     pub fn nop(&mut self) -> Result<()> {
-        self.buf.db(0x90)
+        self.nop_bytes(1, 2)
+    }
+
+    /// Emit `size` bytes using Xbyak's multi-byte NOP table.
+    ///
+    /// This is the Rust counterpart of Xbyak's overloaded
+    /// `nop(size, useMultiByteNop)` method.
+    pub fn nop_bytes(&mut self, mut size: usize, use_multi_byte_nop: u8) -> Result<()> {
+        const NOP_TABLE: [&[u8]; 15] = [
+            &[0x90],
+            &[0x66, 0x90],
+            &[0x0F, 0x1F, 0x00],
+            &[0x0F, 0x1F, 0x40, 0x00],
+            &[0x0F, 0x1F, 0x44, 0x00, 0x00],
+            &[0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00],
+            &[0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00],
+            &[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            &[0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            &[0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            &[
+                0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            &[
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+            ],
+        ];
+
+        if use_multi_byte_nop == 0 {
+            while size != 0 {
+                self.buf.db(0x90)?;
+                size -= 1;
+            }
+            return Ok(());
+        }
+
+        let sequence_count = if use_multi_byte_nop == 2 { 15 } else { 9 };
+        while size != 0 {
+            let len = sequence_count.min(size);
+            for &byte in NOP_TABLE[len - 1] {
+                self.buf.db(byte)?;
+            }
+            size -= len;
+        }
+        Ok(())
     }
 
     /// `ret` — Return from procedure.
@@ -294,7 +560,26 @@ impl CodeAssembler {
     /// `ret imm16` — Return and pop imm16 bytes from stack.
     #[inline]
     pub fn ret_imm(&mut self, imm: u16) -> Result<()> {
+        if imm == 0 {
+            return self.ret();
+        }
         self.buf.db(0xC2)?;
+        self.buf.dw(imm)
+    }
+
+    /// `retf` — Far return.
+    #[inline]
+    pub fn retf(&mut self) -> Result<()> {
+        self.buf.db(0xCB)
+    }
+
+    /// `retf imm16` — Far return and pop imm16 bytes from the stack.
+    #[inline]
+    pub fn retf_imm(&mut self, imm: u16) -> Result<()> {
+        if imm == 0 {
+            return self.retf();
+        }
+        self.buf.db(0xCA)?;
         self.buf.dw(imm)
     }
 
@@ -366,6 +651,81 @@ impl CodeAssembler {
                 Err(Error::BadCombination)
             }
         }
+    }
+
+    /// `push2 r64, r64` — APX paired push.
+    #[inline]
+    pub fn push2(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W0, 0xFF, 6)
+    }
+
+    /// `push2p r64, r64` — APX paired push with PPX hint.
+    #[inline]
+    pub fn push2p(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W1, 0xFF, 6)
+    }
+
+    /// `pop2 r64, r64` — APX paired pop.
+    #[inline]
+    pub fn pop2(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W0, 0x8F, 0)
+    }
+
+    /// `pop2p r64, r64` — APX paired pop with PPX hint.
+    #[inline]
+    pub fn pop2p(&mut self, first: Reg, second: Reg) -> Result<()> {
+        self.push_pop2(first, second, TypeFlags::T_W1, 0x8F, 0)
+    }
+
+    fn push_pop2(
+        &mut self,
+        first: Reg,
+        second: Reg,
+        width: TypeFlags,
+        opcode: u8,
+        extension: u8,
+    ) -> Result<()> {
+        if !first.is_reg_bit(64) || !second.is_reg_bit(64) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_roo(
+            &first,
+            &RegMem::Reg(second),
+            &RegMem::Reg(Reg::gpr64(extension)),
+            TypeFlags::T_APX | TypeFlags::T_ND1 | width,
+            opcode,
+            0,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// `pushp r64` — APX push with the PPX hint.
+    #[inline]
+    pub fn pushp(&mut self, reg: Reg) -> Result<()> {
+        self.push_pop_p(reg, 0x50)
+    }
+
+    /// `popp r64` — APX pop with the PPX hint.
+    #[inline]
+    pub fn popp(&mut self, reg: Reg) -> Result<()> {
+        self.push_pop_p(reg, 0x58)
+    }
+
+    /// Xbyak `opPushPopP`: REX2 is mandatory because it carries W=1 PPX.
+    fn push_pop_p(&mut self, reg: Reg, opcode: u8) -> Result<()> {
+        if !reg.is_reg_bit(64) {
+            return Err(Error::BadCombination);
+        }
+        let none = Reg::default();
+        self.buf.emit_rex2(
+            false,
+            crate::encode::rex_rxb(3, true, &none, &reg, &none),
+            &none,
+            &reg,
+            &none,
+        )?;
+        self.buf.db(opcode | (reg.get_idx() & 7))
     }
 
     /// `mov dst, src` — Move data.
@@ -532,6 +892,131 @@ impl CodeAssembler {
         self.arith_op(dst, src, 0)
     }
 
+    fn rao_int(&mut self, addr: Address, reg: Reg, prefix: TypeFlags) -> Result<()> {
+        if !reg.is_reg() || (!reg.is_bit(32) && !reg.is_bit(64)) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_mr_alt(
+            &addr,
+            &reg,
+            prefix | TypeFlags::T_0F38,
+            0xFC,
+            prefix | TypeFlags::T_APX,
+            0xFC,
+        )
+    }
+
+    /// `aadd m32/m64, r32/r64` — RAO-INT atomic add.
+    #[inline]
+    pub fn aadd(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::NONE)
+    }
+
+    /// `aand m32/m64, r32/r64` — RAO-INT atomic AND.
+    #[inline]
+    pub fn aand(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::T_66)
+    }
+
+    /// `aor m32/m64, r32/r64` — RAO-INT atomic OR.
+    #[inline]
+    pub fn aor(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::T_F2)
+    }
+
+    /// `axor m32/m64, r32/r64` — RAO-INT atomic XOR.
+    #[inline]
+    pub fn axor(&mut self, addr: Address, reg: Reg) -> Result<()> {
+        self.rao_int(addr, reg, TypeFlags::T_F3)
+    }
+
+    /// `bnd` — emit the MPX branch prefix.
+    #[inline]
+    pub fn bnd(&mut self) -> Result<()> {
+        self.buf.db(0xF2)
+    }
+
+    fn bnd_check(&mut self, bnd: Reg, op: RegMem, prefix: TypeFlags, opcode: u8) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_rext_disable_rex(&op, bnd.get_idx(), prefix | TypeFlags::T_0F, opcode)
+    }
+
+    /// `bndcl bnd, r/m32/r/m64` — check lower bound.
+    #[inline]
+    pub fn bndcl(&mut self, bnd: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bnd_check(bnd, op.into(), TypeFlags::T_F3, 0x1A)
+    }
+
+    /// `bndcn bnd, r/m32/r/m64` — check upper bound using one's complement.
+    #[inline]
+    pub fn bndcn(&mut self, bnd: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bnd_check(bnd, op.into(), TypeFlags::T_F2, 0x1B)
+    }
+
+    /// `bndcu bnd, r/m32/r/m64` — check upper bound.
+    #[inline]
+    pub fn bndcu(&mut self, bnd: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bnd_check(bnd, op.into(), TypeFlags::T_F2, 0x1A)
+    }
+
+    /// `bndldx bnd, mib` — load bounds using an MPX address expression.
+    #[inline]
+    pub fn bndldx(&mut self, bnd: Reg, addr: Address) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_mib(&addr, &bnd, TypeFlags::T_0F, 0x1A)
+    }
+
+    /// `bndmk bnd, m` — create bounds.
+    #[inline]
+    pub fn bndmk(&mut self, bnd: Reg, addr: Address) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_mr(&addr, &bnd, TypeFlags::T_F3 | TypeFlags::T_0F, 0x1B)
+    }
+
+    /// Xbyak's `bndmov bnd, bnd/m` load/register form.
+    #[inline]
+    pub fn bndmov(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        if !dst.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        let src = src.into();
+        self.buf.op_ro(
+            &dst,
+            &src,
+            TypeFlags::T_66 | TypeFlags::T_0F,
+            0x1A,
+            matches!(src, RegMem::Reg(reg) if reg.is_bndreg()),
+            0,
+        )
+    }
+
+    /// Xbyak's `bndmov m, bnd` store form.
+    #[inline]
+    pub fn bndmov_store(&mut self, addr: Address, src: Reg) -> Result<()> {
+        if !src.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_mr(&addr, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x1B)
+    }
+
+    /// `bndstx mib, bnd` — store bounds using an MPX address expression.
+    #[inline]
+    pub fn bndstx(&mut self, addr: Address, bnd: Reg) -> Result<()> {
+        if !bnd.is_bndreg() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_mib(&addr, &bnd, TypeFlags::T_0F, 0x1B)
+    }
+
     /// `or dst, src`
     #[inline]
     pub fn or_(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>) -> Result<()> {
@@ -542,6 +1027,286 @@ impl CodeAssembler {
     #[inline]
     pub fn adc(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMemImm>) -> Result<()> {
         self.arith_op(dst, src, 2)
+    }
+
+    fn adcx_adox(&mut self, reg: Reg, op: RegMem, prefix: TypeFlags) -> Result<()> {
+        if !reg.is_reg() || (!reg.is_bit(32) && !reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if self.buf.op_roo(
+            &Reg::default(),
+            &op,
+            &RegMem::Reg(reg),
+            prefix,
+            0x66,
+            0,
+            None,
+        )? {
+            return Ok(());
+        }
+        self.buf
+            .op_ro(&reg, &op, prefix | TypeFlags::T_0F38, 0xF6, true, 0)
+    }
+
+    fn adcx_adox3(&mut self, dst: Reg, reg: Reg, op: RegMem, prefix: TypeFlags) -> Result<()> {
+        if !dst.is_reg()
+            || (!dst.is_bit(32) && !dst.is_bit(64))
+            || !reg.is_reg()
+            || (!reg.is_bit(32) && !reg.is_bit(64))
+        {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf
+            .op_roo(&dst, &op, &RegMem::Reg(reg), prefix, 0x66, 0, None)?;
+        Ok(())
+    }
+
+    /// `adcx r32/r64, r/m32/r/m64` — carry-chain addition.
+    #[inline]
+    pub fn adcx(&mut self, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox(reg, op.into(), TypeFlags::T_66)
+    }
+
+    /// Xbyak's three-operand `adcx d, reg, r/m` APX form.
+    #[inline]
+    pub fn adcx3(&mut self, dst: Reg, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox3(dst, reg, op.into(), TypeFlags::T_66)
+    }
+
+    /// `adox r32/r64, r/m32/r/m64` — overflow-chain addition.
+    #[inline]
+    pub fn adox(&mut self, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox(reg, op.into(), TypeFlags::T_F3)
+    }
+
+    /// Xbyak's three-operand `adox d, reg, r/m` APX form.
+    #[inline]
+    pub fn adox3(&mut self, dst: Reg, reg: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.adcx_adox3(dst, reg, op.into(), TypeFlags::T_F3)
+    }
+
+    fn validate_dfv(dfv: i32) -> Result<u8> {
+        if !(0..=15).contains(&dfv) {
+            return Err(Error::InvalidDfv);
+        }
+        Ok(dfv as u8)
+    }
+
+    fn conditional_imm_bit(op: &RegMem, imm: i32) -> Result<u8> {
+        let op_bit = op.get_bit();
+        if op_bit == 0 {
+            return Err(Error::MemSizeIsNotSpecified);
+        }
+        let value = imm as u32;
+        let mut imm_bit = if (-128..=127).contains(&imm) {
+            8
+        } else {
+            let high = value & 0xFFFF_0000;
+            if high == 0 || high == 0xFFFF_0000 {
+                16
+            } else {
+                32
+            }
+        };
+        if op_bit == 8 {
+            imm_bit = 8;
+        }
+        if op_bit < imm_bit {
+            return Err(Error::ImmIsTooBig);
+        }
+        if (op_bit == 32 || op_bit == 64) && imm_bit == 16 {
+            imm_bit = 32;
+        }
+        Ok(imm_bit as u8)
+    }
+
+    fn op_ccmp(&mut self, op1: RegMem, op2: RegMem, dfv: i32, opcode: u8, sc: u8) -> Result<()> {
+        let dfv = Self::validate_dfv(dfv)?;
+        let bit = op1.get_bit() | op2.get_bit();
+        let default_flags = Reg::new(15 - dfv, crate::operand::Kind::Reg, bit);
+        self.buf.op_roo(
+            &default_flags,
+            &op1,
+            &op2,
+            TypeFlags::T_APX | TypeFlags::T_CODE1_IF1,
+            opcode,
+            0,
+            Some(sc),
+        )?;
+        Ok(())
+    }
+
+    fn op_ccmpi(&mut self, op: RegMem, imm: i32, dfv: i32, sc: u8) -> Result<()> {
+        let dfv = Self::validate_dfv(dfv)?;
+        let imm_bit = Self::conditional_imm_bit(&op, imm)?;
+        let op_bit = op.get_bit();
+        let opcode = 0x80 | (u8::from((imm_bit as u16) < op_bit.min(32)) * 2);
+        self.buf.op_roo(
+            &Reg::new(15 - dfv, crate::operand::Kind::Reg, op_bit),
+            &op,
+            &RegMem::Reg(Reg::new(15, crate::operand::Kind::Reg, op_bit)),
+            TypeFlags::T_APX | TypeFlags::T_CODE1_IF1,
+            opcode,
+            imm_bit / 8,
+            Some(sc),
+        )?;
+        self.buf.db_n(imm as u32 as u64, (imm_bit / 8) as usize)
+    }
+
+    fn op_testi(&mut self, op: RegMem, imm: i32, dfv: i32, sc: u8) -> Result<()> {
+        let dfv = Self::validate_dfv(dfv)?;
+        let op_bit = op.get_bit();
+        if op_bit == 0 {
+            return Err(Error::MemSizeIsNotSpecified);
+        }
+        let imm_bit = op_bit.min(32) as u8;
+        self.buf.op_roo(
+            &Reg::new(15 - dfv, crate::operand::Kind::Reg, op_bit),
+            &op,
+            &RegMem::Reg(Reg::new(0, crate::operand::Kind::Reg, op_bit)),
+            TypeFlags::T_APX | TypeFlags::T_CODE1_IF1,
+            0xF6,
+            imm_bit / 8,
+            Some(sc),
+        )?;
+        self.buf.db_n(imm as u32 as u64, (imm_bit / 8) as usize)
+    }
+
+    fn op_cfcmov(&mut self, dst: Reg, op1: RegMem, op2: RegMem, opcode: u8) -> Result<()> {
+        let dst_bit = dst.get_bit();
+        let op2_bit = op2.get_bit();
+        if dst_bit > 0 && op2_bit > 0 && dst_bit != op2_bit {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if op1.get_bit() == 8 || op2_bit == 8 {
+            return Err(Error::BadSizeOfRegister);
+        }
+        match op2 {
+            RegMem::Mem(_) => {
+                if op1.is_mem() {
+                    return Err(Error::BadCombination);
+                }
+                let type_ = TypeFlags::T_MUST_EVEX
+                    | if dst_bit > 0 {
+                        TypeFlags::T_NF
+                    } else {
+                        TypeFlags::NONE
+                    };
+                self.buf.op_roo(&dst, &op2, &op1, type_, opcode, 0, None)?;
+            }
+            RegMem::Reg(reg) => {
+                self.buf.op_roo(
+                    &dst,
+                    &op1,
+                    &RegMem::Reg(reg.nf()),
+                    TypeFlags::T_MUST_EVEX | TypeFlags::T_NF,
+                    opcode,
+                    0,
+                    None,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    define_ccmp_methods! {
+        ccmpa, ccmpa_imm => 7;
+        ccmpae, ccmpae_imm => 3;
+        ccmpb, ccmpb_imm => 2;
+        ccmpbe, ccmpbe_imm => 6;
+        ccmpc, ccmpc_imm => 2;
+        ccmpe, ccmpe_imm => 4;
+        ccmpf, ccmpf_imm => 11;
+        ccmpg, ccmpg_imm => 15;
+        ccmpge, ccmpge_imm => 13;
+        ccmpl, ccmpl_imm => 12;
+        ccmple, ccmple_imm => 14;
+        ccmpna, ccmpna_imm => 6;
+        ccmpnae, ccmpnae_imm => 2;
+        ccmpnb, ccmpnb_imm => 3;
+        ccmpnbe, ccmpnbe_imm => 7;
+        ccmpnc, ccmpnc_imm => 3;
+        ccmpne, ccmpne_imm => 5;
+        ccmpng, ccmpng_imm => 14;
+        ccmpnge, ccmpnge_imm => 12;
+        ccmpnl, ccmpnl_imm => 13;
+        ccmpnle, ccmpnle_imm => 15;
+        ccmpno, ccmpno_imm => 1;
+        ccmpns, ccmpns_imm => 9;
+        ccmpnz, ccmpnz_imm => 5;
+        ccmpo, ccmpo_imm => 0;
+        ccmps, ccmps_imm => 8;
+        ccmpt, ccmpt_imm => 10;
+        ccmpz, ccmpz_imm => 4;
+    }
+
+    define_ctest_methods! {
+        ctesta, ctesta_imm => 7;
+        ctestae, ctestae_imm => 3;
+        ctestb, ctestb_imm => 2;
+        ctestbe, ctestbe_imm => 6;
+        ctestc, ctestc_imm => 2;
+        cteste, cteste_imm => 4;
+        ctestf, ctestf_imm => 11;
+        ctestg, ctestg_imm => 15;
+        ctestge, ctestge_imm => 13;
+        ctestl, ctestl_imm => 12;
+        ctestle, ctestle_imm => 14;
+        ctestna, ctestna_imm => 6;
+        ctestnae, ctestnae_imm => 2;
+        ctestnb, ctestnb_imm => 3;
+        ctestnbe, ctestnbe_imm => 7;
+        ctestnc, ctestnc_imm => 3;
+        ctestne, ctestne_imm => 5;
+        ctestng, ctestng_imm => 14;
+        ctestnge, ctestnge_imm => 12;
+        ctestnl, ctestnl_imm => 13;
+        ctestnle, ctestnle_imm => 15;
+        ctestno, ctestno_imm => 1;
+        ctestns, ctestns_imm => 9;
+        ctestnz, ctestnz_imm => 5;
+        ctesto, ctesto_imm => 0;
+        ctests, ctests_imm => 8;
+        ctestt, ctestt_imm => 10;
+        ctestz, ctestz_imm => 4;
+    }
+
+    define_cfcmov_methods! {
+        cfcmovo, cfcmovo3 => 0x40;
+        cfcmovno, cfcmovno3 => 0x41;
+        cfcmovb, cfcmovb3 => 0x42;
+        cfcmovnb, cfcmovnb3 => 0x43;
+        cfcmovz, cfcmovz3 => 0x44;
+        cfcmovnz, cfcmovnz3 => 0x45;
+        cfcmovbe, cfcmovbe3 => 0x46;
+        cfcmovnbe, cfcmovnbe3 => 0x47;
+        cfcmovs, cfcmovs3 => 0x48;
+        cfcmovns, cfcmovns3 => 0x49;
+        cfcmovp, cfcmovp3 => 0x4A;
+        cfcmovnp, cfcmovnp3 => 0x4B;
+        cfcmovl, cfcmovl3 => 0x4C;
+        cfcmovnl, cfcmovnl3 => 0x4D;
+        cfcmovle, cfcmovle3 => 0x4E;
+        cfcmovnle, cfcmovnle3 => 0x4F;
+    }
+
+    define_cmpccxadd_methods! {
+        cmpoxadd => 0xE0;
+        cmpnoxadd => 0xE1;
+        cmpbxadd => 0xE2;
+        cmpnbxadd => 0xE3;
+        cmpzxadd => 0xE4;
+        cmpnzxadd => 0xE5;
+        cmpbexadd => 0xE6;
+        cmpnbexadd => 0xE7;
+        cmpsxadd => 0xE8;
+        cmpnsxadd => 0xE9;
+        cmppxadd => 0xEA;
+        cmpnpxadd => 0xEB;
+        cmplxadd => 0xEC;
+        cmpnlxadd => 0xED;
+        cmplexadd => 0xEE;
+        cmpnlexadd => 0xEF;
     }
 
     /// `sbb dst, src`
@@ -728,6 +1493,46 @@ impl CodeAssembler {
         }
     }
 
+    /// `jmpabs imm64` — APX absolute jump encoding.
+    #[inline]
+    pub fn jmpabs(&mut self, address: u64) -> Result<()> {
+        self.buf.db(0xD5)?;
+        self.buf.db(0x00)?;
+        self.buf.db(0xA1)?;
+        self.buf.dq(address)
+    }
+
+    /// `jecxz label` — Address-size override plus short-only branch.
+    #[inline]
+    pub fn jecxz(&mut self, label: &Label) -> Result<()> {
+        self.buf.db(0x67)?;
+        self.short_label_jump(label, 0xE3)
+    }
+
+    /// `jrcxz label` — Short-only branch.
+    #[inline]
+    pub fn jrcxz(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE3)
+    }
+
+    /// `loop label` — Short-only branch.
+    #[inline]
+    pub fn loop_(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE2)
+    }
+
+    /// `loope label` — Short-only branch.
+    #[inline]
+    pub fn loope(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE1)
+    }
+
+    /// `loopne label` — Short-only branch.
+    #[inline]
+    pub fn loopne(&mut self, label: &Label) -> Result<()> {
+        self.short_label_jump(label, 0xE0)
+    }
+
     /// `jmp reg` — Jump to address in register.
     #[inline]
     pub fn jmp_reg(&mut self, op: impl Into<RegMem>) -> Result<()> {
@@ -879,11 +1684,100 @@ impl CodeAssembler {
     pub fn jge(&mut self, label: &Label, t: JmpType) -> Result<()> {
         self.jnl(label, t)
     }
+    #[inline]
+    pub fn jna(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jbe(label, t)
+    }
+    #[inline]
+    pub fn jnae(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jb(label, t)
+    }
+    #[inline]
+    pub fn jng(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jle(label, t)
+    }
+    #[inline]
+    pub fn jnge(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jl(label, t)
+    }
+    #[inline]
+    pub fn jpe(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jp(label, t)
+    }
+    #[inline]
+    pub fn jpo(&mut self, label: &Label, t: JmpType) -> Result<()> {
+        self.jnp(label, t)
+    }
 
     /// `int3` — Software breakpoint.
     #[inline]
     pub fn int3(&mut self) -> Result<()> {
         self.buf.db(0xCC)
+    }
+
+    /// `int imm8` — Software interrupt.
+    #[inline]
+    pub fn int_(&mut self, vector: u8) -> Result<()> {
+        self.buf.db(0xCD)?;
+        self.buf.db(vector)
+    }
+
+    /// `in accumulator, dx`.
+    #[inline]
+    pub fn in_(&mut self, accumulator: Reg, port: Reg) -> Result<()> {
+        self.op_in_out_reg(accumulator, port, 0xEC)
+    }
+
+    /// `in accumulator, imm8`.
+    #[inline]
+    pub fn in_imm(&mut self, accumulator: Reg, port: u8) -> Result<()> {
+        self.op_in_out_imm(accumulator, 0xE4, port)
+    }
+
+    /// `out dx, accumulator`.
+    #[inline]
+    pub fn out_(&mut self, port: Reg, accumulator: Reg) -> Result<()> {
+        self.op_in_out_reg(accumulator, port, 0xEE)
+    }
+
+    /// `out imm8, accumulator`.
+    #[inline]
+    pub fn out_imm(&mut self, port: u8, accumulator: Reg) -> Result<()> {
+        self.op_in_out_imm(accumulator, 0xE6, port)
+    }
+
+    #[inline]
+    pub fn outsb(&mut self) -> Result<()> {
+        self.buf.db(0x6E)
+    }
+
+    #[inline]
+    pub fn outsd(&mut self) -> Result<()> {
+        self.buf.db(0x6F)
+    }
+
+    #[inline]
+    pub fn outsw(&mut self) -> Result<()> {
+        self.buf.db(0x66)?;
+        self.buf.db(0x6F)
+    }
+
+    /// `lfs reg, [mem]`.
+    #[inline]
+    pub fn lfs(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_load_seg(&addr, &reg, TypeFlags::T_0F, 0xB4)
+    }
+
+    /// `lgs reg, [mem]`.
+    #[inline]
+    pub fn lgs(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_load_seg(&addr, &reg, TypeFlags::T_0F, 0xB5)
+    }
+
+    /// `lss reg, [mem]`.
+    #[inline]
+    pub fn lss(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_load_seg(&addr, &reg, TypeFlags::T_0F, 0xB2)
     }
 
     /// `xchg op1, op2` — Exchange values. At most one operand may be memory.
@@ -1028,6 +1922,12 @@ impl CodeAssembler {
         self.shift_op(op.into(), imm, 4)
     }
 
+    /// `sal r/m, imm` — Xbyak spelling alias for `shl`.
+    #[inline]
+    pub fn sal(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.shl(op, imm)
+    }
+
     /// `shr r/m, imm`
     #[inline]
     pub fn shr(&mut self, op: impl Into<RegMem>, imm: u8) -> Result<()> {
@@ -1075,6 +1975,12 @@ impl CodeAssembler {
         self.shift_op_cl(op.into(), 4)
     }
 
+    /// `sal r/m, CL` — Xbyak spelling alias for `shl`.
+    #[inline]
+    pub fn sal_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
+        self.shl_cl(op)
+    }
+
     /// `shr r/m, CL`
     #[inline]
     pub fn shr_cl(&mut self, op: impl Into<RegMem>) -> Result<()> {
@@ -1111,6 +2017,28 @@ impl CodeAssembler {
         self.buf.op_vex(&x1, Some(&x2), &op, type_, code, imm8)
     }
 
+    /// Xbyak `opAVX_X_XM_IMM`: choose the index-zero merge register from the
+    /// destination vector width, then use the ordinary AVX three-operand path.
+    fn op_avx_x_xm_imm(
+        &mut self,
+        dst: Reg,
+        op: impl Into<RegMem>,
+        type_: TypeFlags,
+        code: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        let zero = if dst.is_zmm() {
+            Reg::zmm(0)
+        } else if dst.is_ymm() {
+            Reg::ymm(0)
+        } else if dst.is_xmm() {
+            Reg::xmm(0)
+        } else {
+            return Err(Error::BadCombination);
+        };
+        self.op_avx_x_x_xm(dst, zero, op, type_, code, imm8)
+    }
+
     /// AVX-512 form with opmask: (k, xmm, xmm/m)
     pub(crate) fn op_avx_k_x_xm(
         &mut self,
@@ -1128,6 +2056,1230 @@ impl CodeAssembler {
             }
         }
         self.buf.op_vex(&k, Some(&x2), &op, type_, code, imm8)
+    }
+
+    // ─── Xbyak vector move/blend parity ───────────────────────
+
+    fn vblendv(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+        opcode: u8,
+    ) -> Result<()> {
+        if !mask.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_0F3A | TypeFlags::T_66 | TypeFlags::T_YMM,
+            opcode,
+            Some(mask.get_idx().wrapping_mul(16)),
+        )
+    }
+
+    /// `vblendvpd xmm/ymm, xmm/ymm, xmm/ymm/m, xmm`.
+    pub fn vblendvpd(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+    ) -> Result<()> {
+        self.vblendv(dst, merge, src, mask, 0x4B)
+    }
+
+    /// `vblendvps xmm/ymm, xmm/ymm, xmm/ymm/m, xmm`.
+    pub fn vblendvps(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+    ) -> Result<()> {
+        self.vblendv(dst, merge, src, mask, 0x4A)
+    }
+
+    /// `vpblendvb xmm/ymm, xmm/ymm, xmm/ymm/m, xmm`.
+    pub fn vpblendvb(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        mask: Reg,
+    ) -> Result<()> {
+        self.vblendv(dst, merge, src, mask, 0x4C)
+    }
+
+    /// `vldmxcsr m32`.
+    pub fn vldmxcsr(&mut self, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(Reg::xmm(2), Reg::xmm(0), addr, TypeFlags::T_0F, 0xAE, None)
+    }
+
+    /// `vstmxcsr m32`.
+    pub fn vstmxcsr(&mut self, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(Reg::xmm(3), Reg::xmm(0), addr, TypeFlags::T_0F, 0xAE, None)
+    }
+
+    /// `vmaskmovdqu xmm, xmm`.
+    pub fn vmaskmovdqu(&mut self, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            data,
+            Reg::xmm(0),
+            mask,
+            TypeFlags::T_0F | TypeFlags::T_66,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `vmaskmovpd xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vmaskmovpd(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2D,
+            None,
+        )
+    }
+
+    /// `vmaskmovpd m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vmaskmovpd_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2F,
+            None,
+        )
+    }
+
+    /// `vmaskmovps xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vmaskmovps(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2C,
+            None,
+        )
+    }
+
+    /// `vmaskmovps m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vmaskmovps_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x2E,
+            None,
+        )
+    }
+
+    /// `vpmaskmovd xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vpmaskmovd(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x8C,
+            None,
+        )
+    }
+
+    /// `vpmaskmovd m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vpmaskmovd_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            0x8E,
+            None,
+        )
+    }
+
+    /// `vpmaskmovq xmm/ymm, xmm/ymm, m128/m256` load form.
+    pub fn vpmaskmovq(&mut self, dst: Reg, mask: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            mask,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W1 | TypeFlags::T_YMM,
+            0x8C,
+            None,
+        )
+    }
+
+    /// `vpmaskmovq m128/m256, xmm/ymm, xmm/ymm` store form.
+    pub fn vpmaskmovq_store(&mut self, addr: Address, data: Reg, mask: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            mask,
+            data,
+            addr,
+            TypeFlags::T_0F38 | TypeFlags::T_66 | TypeFlags::T_W1 | TypeFlags::T_YMM,
+            0x8E,
+            None,
+        )
+    }
+
+    fn vmov_half_ps(&mut self, dst: Reg, merge: Reg, src: Reg, opcode: u8) -> Result<()> {
+        if !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_0F | TypeFlags::T_EVEX | TypeFlags::T_W0,
+            opcode,
+            None,
+        )
+    }
+
+    /// `vmovhlps xmm, xmm, xmm`.
+    pub fn vmovhlps(&mut self, dst: Reg, merge: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, merge, src, 0x12)
+    }
+
+    /// Xbyak's default-operand `vmovhlps xmm, xmm` form.
+    pub fn vmovhlps_2(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, dst, src, 0x12)
+    }
+
+    /// `vmovlhps xmm, xmm, xmm`.
+    pub fn vmovlhps(&mut self, dst: Reg, merge: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, merge, src, 0x16)
+    }
+
+    /// Xbyak's default-operand `vmovlhps xmm, xmm` form.
+    pub fn vmovlhps_2(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vmov_half_ps(dst, dst, src, 0x16)
+    }
+
+    /// `vmovntdqa xmm/ymm/zmm, m`.
+    pub fn vmovntdqa(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Mem(addr),
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_W0,
+            0x2A,
+            None,
+        )
+    }
+
+    /// `vcompresspd xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vcompresspd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8A,
+            None,
+        )
+    }
+
+    /// `vcompressps xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vcompressps(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8A,
+            None,
+        )
+    }
+
+    /// `vpcompressb xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N1
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x63,
+            None,
+        )
+    }
+
+    /// `vpcompressd xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8B,
+            None,
+        )
+    }
+
+    /// `vpcompressq xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressq(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x8B,
+            None,
+        )
+    }
+
+    /// `vpcompressw xmm/ymm/zmm/m, xmm/ymm/zmm`.
+    pub fn vpcompressw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            dst,
+            TypeFlags::T_N2
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x63,
+            None,
+        )
+    }
+
+    /// `vmovsh xmm, xmm, xmm`.
+    pub fn vmovsh(&mut self, dst: Reg, merge: Reg, src: Reg) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_N2
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX,
+            0x10,
+            None,
+        )
+    }
+
+    /// `vmovsh xmm, m16`.
+    pub fn vmovsh_load(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_avx_x_x_xm(
+            dst,
+            Reg::xmm(0),
+            addr,
+            TypeFlags::T_N2
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX,
+            0x10,
+            None,
+        )
+    }
+
+    /// `vmovsh m16, xmm`.
+    pub fn vmovsh_store(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            src,
+            addr,
+            TypeFlags::T_N2
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            0x11,
+            None,
+        )
+    }
+
+    /// `vpabsq xmm/ymm/zmm, xmm/ymm/zmm/m`.
+    pub fn vpabsq(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_avx_x_xm_imm(
+            dst,
+            src,
+            TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_EW1
+                | TypeFlags::T_B64
+                | TypeFlags::T_YMM,
+            0x1F,
+            None,
+        )
+    }
+
+    fn vmovrs(&mut self, dst: Reg, addr: Address, type_: TypeFlags) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Mem(addr),
+            type_ | TypeFlags::T_MAP5 | TypeFlags::T_MUST_EVEX,
+            0x6F,
+            None,
+        )
+    }
+
+    pub fn vmovrsb(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F2 | TypeFlags::T_W0)
+    }
+
+    pub fn vmovrsd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F3 | TypeFlags::T_W0)
+    }
+
+    pub fn vmovrsq(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F3 | TypeFlags::T_EW1)
+    }
+
+    pub fn vmovrsw(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.vmovrs(dst, addr, TypeFlags::T_F2 | TypeFlags::T_EW1)
+    }
+
+    fn avx_ne_convert(
+        &mut self,
+        dst: Reg,
+        addr: Address,
+        type_: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Mem(addr),
+            type_ | TypeFlags::T_0F38 | TypeFlags::T_W0 | TypeFlags::T_YMM,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vbcstnebf162ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_F3 | TypeFlags::T_B16, 0xB1)
+    }
+
+    pub fn vbcstnesh2ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_66 | TypeFlags::T_B16, 0xB1)
+    }
+
+    pub fn vcvtneebf162ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_F3, 0xB0)
+    }
+
+    pub fn vcvtneeph2ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_66, 0xB0)
+    }
+
+    pub fn vcvtneobf162ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::T_F2, 0xB0)
+    }
+
+    pub fn vcvtneoph2ps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.avx_ne_convert(dst, addr, TypeFlags::NONE, 0xB0)
+    }
+
+    fn op_gather(
+        &mut self,
+        dst: Reg,
+        addr: Address,
+        mask: Reg,
+        type_: TypeFlags,
+        opcode: u8,
+        mode: u8,
+    ) -> Result<()> {
+        let exp = addr.get_reg_exp();
+        let index = *exp.get_index();
+        if !matches!(index.get_bit(), 128 | 256) {
+            return Err(Error::BadVsibAddressing);
+        }
+
+        let index_is_ymm = index.get_bit() == 256;
+        if !dst.is_xmm() || index_is_ymm || !mask.is_xmm() {
+            let valid = match mode {
+                0 => dst.is_ymm() && !index_is_ymm && mask.is_ymm(),
+                1 => dst.is_ymm() && index_is_ymm && mask.is_ymm(),
+                _ => !dst.is_ymm() && index_is_ymm && !mask.is_ymm(),
+            };
+            if !valid {
+                return Err(Error::BadVsibAddressing);
+            }
+        }
+
+        if dst.get_idx() == index.get_idx()
+            || dst.get_idx() == mask.get_idx()
+            || index.get_idx() == mask.get_idx()
+        {
+            return Err(Error::SameRegsAreInvalid);
+        }
+
+        let encoded_dst = if index_is_ymm {
+            Reg::ymm(dst.get_idx())
+        } else {
+            dst
+        };
+        let encoded_mask = if index_is_ymm {
+            Reg::ymm(mask.get_idx())
+        } else {
+            mask
+        };
+        self.op_avx_x_x_xm(encoded_dst, encoded_mask, addr, type_, opcode, None)
+    }
+
+    fn check_gather2(value: Reg, index: Reg, mode: u8) -> Result<()> {
+        if value.is_xmm() && index.is_xmm() {
+            return Ok(());
+        }
+        let valid = match mode {
+            0 => (value.is_ymm() && index.is_ymm()) || (value.is_zmm() && index.is_zmm()),
+            1 => (value.is_ymm() && index.is_xmm()) || (value.is_zmm() && index.is_ymm()),
+            2 => (value.is_xmm() && index.is_ymm()) || (value.is_ymm() && index.is_zmm()),
+            _ => false,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::BadVsibAddressing)
+        }
+    }
+
+    fn op_gather2(
+        &mut self,
+        value: Reg,
+        addr: Address,
+        type_: TypeFlags,
+        opcode: u8,
+        mode: u8,
+    ) -> Result<()> {
+        if value.has_zero() {
+            return Err(Error::InvalidZero);
+        }
+        let index = *addr.get_reg_exp().get_index();
+        Self::check_gather2(value, index, mode)?;
+
+        let mut mask_idx = value.get_opmask_idx();
+        if type_.contains(TypeFlags::T_M_K) && addr.get_opmask_idx() != 0 {
+            mask_idx = addr.get_opmask_idx();
+        }
+        if mask_idx == 0 {
+            return Err(Error::K0IsInvalid);
+        }
+        if !type_.contains(TypeFlags::T_M_K) && value.get_idx() == index.get_idx() {
+            return Err(Error::SameRegsAreInvalid);
+        }
+        self.buf
+            .op_vex(&value, None, &RegMem::Mem(addr), type_, opcode, None)
+    }
+
+    fn op_gather_fetch(
+        &mut self,
+        addr: Address,
+        extension: u8,
+        type_: TypeFlags,
+        opcode: u8,
+        index_is_ymm: bool,
+    ) -> Result<()> {
+        if addr.has_zero() {
+            return Err(Error::InvalidZero);
+        }
+        let index = *addr.get_reg_exp().get_index();
+        if index_is_ymm != index.is_ymm() || (!index_is_ymm && !index.is_zmm()) {
+            return Err(Error::BadVsibAddressing);
+        }
+        self.buf.op_vex(
+            &Reg::zmm(extension),
+            None,
+            &RegMem::Mem(addr),
+            type_,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vgatherdpd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x92,
+            0,
+        )
+    }
+
+    pub fn vgatherdps_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x92,
+            1,
+        )
+    }
+
+    pub fn vgatherqpd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x93,
+            1,
+        )
+    }
+
+    pub fn vgatherqps_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x93,
+            2,
+        )
+    }
+
+    pub fn vpgatherdd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x90,
+            1,
+        )
+    }
+
+    pub fn vpgatherdq_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x90,
+            0,
+        )
+    }
+
+    pub fn vpgatherqd_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W0,
+            0x91,
+            2,
+        )
+    }
+
+    pub fn vpgatherqq_avx2(&mut self, dst: Reg, addr: Address, mask: Reg) -> Result<()> {
+        self.op_gather(
+            dst,
+            addr,
+            mask,
+            TypeFlags::T_0F38
+                | TypeFlags::T_66
+                | TypeFlags::T_YMM
+                | TypeFlags::T_VSIB
+                | TypeFlags::T_W1,
+            0x91,
+            1,
+        )
+    }
+
+    pub fn vgatherdpd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x92,
+            1,
+        )
+    }
+
+    pub fn vgatherdps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x92,
+            0,
+        )
+    }
+
+    pub fn vgatherqpd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x93,
+            0,
+        )
+    }
+
+    pub fn vgatherqps(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x93,
+            2,
+        )
+    }
+
+    pub fn vpgatherdd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x90,
+            0,
+        )
+    }
+
+    pub fn vpgatherdq(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x90,
+            1,
+        )
+    }
+
+    pub fn vpgatherqd(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x91,
+            2,
+        )
+    }
+
+    pub fn vpgatherqq(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_gather2(
+            dst,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_VSIB,
+            0x91,
+            0,
+        )
+    }
+
+    pub fn vpscatterdd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA0,
+            0,
+        )
+    }
+
+    pub fn vpscatterdq(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA0,
+            1,
+        )
+    }
+
+    pub fn vpscatterqd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA1,
+            2,
+        )
+    }
+
+    pub fn vpscatterqq(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA1,
+            0,
+        )
+    }
+
+    pub fn vscatterdpd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA2,
+            1,
+        )
+    }
+
+    pub fn vscatterdps(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA2,
+            0,
+        )
+    }
+
+    pub fn vscatterqpd(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA3,
+            0,
+        )
+    }
+
+    pub fn vscatterqps(&mut self, addr: Address, src: Reg) -> Result<()> {
+        self.op_gather2(
+            src,
+            addr,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xA3,
+            2,
+        )
+    }
+
+    pub fn vgatherpf0dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vgatherpf0dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vgatherpf0qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vgatherpf0qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            1,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vgatherpf1dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vgatherpf1dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vgatherpf1qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vgatherpf1qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            2,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf0dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vscatterpf0dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vscatterpf0qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf0qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            5,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf1dpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            true,
+        )
+    }
+
+    pub fn vscatterpf1dps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC6,
+            false,
+        )
+    }
+
+    pub fn vscatterpf1qpd(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N8
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
+    }
+
+    pub fn vscatterpf1qps(&mut self, addr: Address) -> Result<()> {
+        self.op_gather_fetch(
+            addr,
+            6,
+            TypeFlags::T_N4
+                | TypeFlags::T_66
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | TypeFlags::T_VSIB,
+            0xC7,
+            false,
+        )
     }
 
     // ─── SSE Instructions ───────────────────────────────────────
@@ -1619,6 +3771,196 @@ impl CodeAssembler {
         }
     }
 
+    /// `movbe reg, [mem]` / `movbe [mem], reg`, including APX EGPR forms.
+    #[inline]
+    pub fn movbe(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMem>) -> Result<()> {
+        match (dst.into(), src.into()) {
+            (RegMem::Reg(reg), RegMem::Mem(addr)) => {
+                self.buf
+                    .op_mr_alt(&addr, &reg, TypeFlags::T_0F38, 0xF0, TypeFlags::T_APX, 0x60)
+            }
+            (RegMem::Mem(addr), RegMem::Reg(reg)) => {
+                self.buf
+                    .op_mr_alt(&addr, &reg, TypeFlags::T_0F38, 0xF1, TypeFlags::T_APX, 0x61)
+            }
+            _ => Err(Error::BadCombination),
+        }
+    }
+
+    /// `movdiri [mem], r32/r64`, including APX EGPR forms.
+    #[inline]
+    pub fn movdiri(&mut self, dst: Address, src: Reg) -> Result<()> {
+        if !src.is_reg() || !(src.is_bit(32) || src.is_bit(64)) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_mr_alt(&dst, &src, TypeFlags::T_0F38, 0xF9, TypeFlags::T_APX, 0xF9)
+    }
+
+    /// `movdir64b reg, [mem]`, including APX EGPR forms.
+    #[inline]
+    pub fn movdir64b(&mut self, reg: Reg, src: Address) -> Result<()> {
+        self.buf.op_mr_alt(
+            &src,
+            &reg.cvt32()?,
+            TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xF8,
+            TypeFlags::T_APX | TypeFlags::T_66,
+            0xF8,
+        )
+    }
+
+    /// `movntdqa xmm, [mem]`.
+    #[inline]
+    pub fn movntdqa(&mut self, dst: Reg, src: Address) -> Result<()> {
+        self.buf.op_sse(
+            &dst,
+            &RegMem::Mem(src),
+            TypeFlags::T_66 | TypeFlags::T_0F38,
+            0x2A,
+            None,
+        )
+    }
+
+    /// `cvtpd2pi mm, xmm/m128`.
+    #[inline]
+    pub fn cvtpd2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x2D, None)
+    }
+
+    /// `cvtpi2pd xmm, mm/m64`.
+    #[inline]
+    pub fn cvtpi2pd(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_xmm_mmx_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x2A, None)
+    }
+
+    /// `cvtpi2ps xmm, mm/m64`.
+    #[inline]
+    pub fn cvtpi2ps(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_xmm_mmx_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(&dst, &src, TypeFlags::T_0F, 0x2A, None)
+    }
+
+    /// `cvtps2pi mm, xmm/m64`.
+    #[inline]
+    pub fn cvtps2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(&dst, &src, TypeFlags::T_0F, 0x2D, None)
+    }
+
+    /// `cvttpd2pi mm, xmm/m128`.
+    #[inline]
+    pub fn cvttpd2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_66 | TypeFlags::T_0F, 0x2C, None)
+    }
+
+    /// `cvttps2pi mm, xmm/m64`.
+    #[inline]
+    pub fn cvttps2pi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        let src = src.into();
+        if !Self::is_mmx_xmm_or_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(&dst, &src, TypeFlags::T_0F, 0x2C, None)
+    }
+
+    /// `maskmovdqu xmm, xmm`.
+    #[inline]
+    pub fn maskmovdqu(&mut self, src: Reg, mask: Reg) -> Result<()> {
+        if !src.is_xmm() || !mask.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(
+            &src,
+            &RegMem::Reg(mask),
+            TypeFlags::T_66 | TypeFlags::T_0F,
+            0xF7,
+            None,
+        )
+    }
+
+    /// `maskmovq mm, mm`.
+    #[inline]
+    pub fn maskmovq(&mut self, src: Reg, mask: Reg) -> Result<()> {
+        if !src.is_mmx() || !mask.is_mmx() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&src, &RegMem::Reg(mask), TypeFlags::T_0F, 0xF7, None)
+    }
+
+    /// `movdq2q mm, xmm`.
+    #[inline]
+    pub fn movdq2q(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_mmx() || !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(
+            &dst,
+            &RegMem::Reg(src),
+            TypeFlags::T_F2 | TypeFlags::T_0F,
+            0xD6,
+            None,
+        )
+    }
+
+    /// `movq2dq xmm, mm`.
+    #[inline]
+    pub fn movq2dq(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_xmm() || !src.is_mmx() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse(
+            &dst,
+            &RegMem::Reg(src),
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            0xD6,
+            None,
+        )
+    }
+
+    /// `movntq [mem], mm`.
+    #[inline]
+    pub fn movntq(&mut self, dst: Address, src: Reg) -> Result<()> {
+        if !src.is_mmx() {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&src, &RegMem::Mem(dst), TypeFlags::T_0F, 0xE7, None)
+    }
+
+    /// `pshufw mm, mm/m64, imm8` (Xbyak also accepts matching XMM operands).
+    #[inline]
+    pub fn pshufw(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        let src = src.into();
+        if !Self::is_matching_mmx_or_xmm_mem(dst, &src) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_sse(&dst, &src, TypeFlags::T_0F, 0x70, Some(imm))
+    }
+
     /// `cvtsi2ss xmm, r/m32`
     #[inline]
     pub fn cvtsi2ss(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
@@ -1706,6 +4048,443 @@ impl CodeAssembler {
     }
 
     // ─── AVX Instructions (VEX-encoded) ─────────────────────────
+
+    /// Rust counterpart of Xbyak's vector-result and opmask-result `vcmp*`
+    /// overloads. The destination register kind selects the upstream overload.
+    fn vcmp_dispatch(
+        &mut self,
+        dst: Reg,
+        src1: Reg,
+        src2: impl Into<RegMem>,
+        imm: u8,
+        vector_type: TypeFlags,
+        opmask_type: TypeFlags,
+    ) -> Result<()> {
+        if dst.is_opmask() {
+            self.op_avx_k_x_xm(dst, src1, src2, opmask_type, 0xC2, Some(imm))
+        } else {
+            self.op_avx_x_x_xm(dst, src1, src2, vector_type, 0xC2, Some(imm))
+        }
+    }
+
+    /// `vcmppd` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmppd(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_YMM,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B64,
+        )
+    }
+
+    /// `vcmpps` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmpps(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_0F | TypeFlags::T_YMM,
+            TypeFlags::T_0F
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+        )
+    }
+
+    /// `vcmpsd` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmpsd(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_F2 | TypeFlags::T_0F,
+            TypeFlags::T_N8
+                | TypeFlags::T_F2
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX,
+        )
+    }
+
+    /// `vcmpss` — VEX vector-result or EVEX opmask-result form.
+    #[inline]
+    pub fn vcmpss(&mut self, dst: Reg, src1: Reg, src2: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vcmp_dispatch(
+            dst,
+            src1,
+            src2,
+            imm,
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            TypeFlags::T_N4
+                | TypeFlags::T_F3
+                | TypeFlags::T_0F
+                | TypeFlags::T_W0
+                | TypeFlags::T_SAE_Z
+                | TypeFlags::T_MUST_EVEX,
+        )
+    }
+
+    /// `vmovq xmm/m64/r64, xmm/m64/r64`
+    ///
+    /// Supports the five Xbyak overload families while retaining their
+    /// distinct VEX/EVEX opcode selection.
+    #[inline]
+    pub fn vmovq(&mut self, dst: impl Into<RegMem>, src: impl Into<RegMem>) -> Result<()> {
+        let dst = dst.into();
+        let src = src.into();
+        let xmm0 = Reg::xmm(0);
+        match (dst, src) {
+            (RegMem::Reg(dst), RegMem::Mem(src)) if dst.is_xmm() => {
+                let (type_, code) = if dst.get_idx() < 16 {
+                    (TypeFlags::T_0F | TypeFlags::T_F3, 0x7E)
+                } else {
+                    (
+                        TypeFlags::T_0F
+                            | TypeFlags::T_66
+                            | TypeFlags::T_EVEX
+                            | TypeFlags::T_EW1
+                            | TypeFlags::T_N8,
+                        0x6E,
+                    )
+                };
+                self.op_avx_x_x_xm(dst, xmm0, src, type_, code, None)
+            }
+            (RegMem::Mem(dst), RegMem::Reg(src)) if src.is_xmm() => {
+                let code = if src.get_idx() < 16 { 0xD6 } else { 0x7E };
+                self.op_avx_x_x_xm(
+                    src,
+                    xmm0,
+                    dst,
+                    TypeFlags::T_0F
+                        | TypeFlags::T_66
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1
+                        | TypeFlags::T_N8,
+                    code,
+                    None,
+                )
+            }
+            (RegMem::Reg(dst), RegMem::Reg(src)) if dst.is_xmm() && src.is_xmm() => self
+                .op_avx_x_x_xm(
+                    dst,
+                    xmm0,
+                    src,
+                    TypeFlags::T_0F
+                        | TypeFlags::T_F3
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1
+                        | TypeFlags::T_N8,
+                    0x7E,
+                    None,
+                ),
+            (RegMem::Reg(dst), RegMem::Reg(src)) if dst.is_xmm() && src.is_reg_bit(64) => self
+                .op_avx_x_x_xm(
+                    dst,
+                    xmm0,
+                    src,
+                    TypeFlags::T_66
+                        | TypeFlags::T_0F
+                        | TypeFlags::T_W1
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1,
+                    0x6E,
+                    None,
+                ),
+            (RegMem::Reg(dst), RegMem::Reg(src)) if dst.is_reg_bit(64) && src.is_xmm() => self
+                .op_avx_x_x_xm(
+                    src,
+                    xmm0,
+                    dst,
+                    TypeFlags::T_66
+                        | TypeFlags::T_0F
+                        | TypeFlags::T_W1
+                        | TypeFlags::T_EVEX
+                        | TypeFlags::T_EW1,
+                    0x7E,
+                    None,
+                ),
+            _ => Err(Error::BadCombination),
+        }
+    }
+
+    /// `vcvtsi2sd xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtsi2sd(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_0F | TypeFlags::T_F2 | TypeFlags::T_EVEX,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_ER_R | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x2A,
+        )
+    }
+
+    /// `vcvtsi2ss xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtsi2ss(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_0F | TypeFlags::T_F3 | TypeFlags::T_EVEX | TypeFlags::T_ER_R,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x2A,
+        )
+    }
+
+    /// `vcvtusi2sd xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtusi2sd(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_MUST_EVEX,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_ER_R | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x7B,
+        )
+    }
+
+    /// `vcvtusi2ss xmm, xmm, r/m32|r/m64`
+    #[inline]
+    pub fn vcvtusi2ss(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt3(
+            dst,
+            merge,
+            src.into(),
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_MUST_EVEX | TypeFlags::T_ER_R,
+            TypeFlags::T_W1 | TypeFlags::T_EW1 | TypeFlags::T_N8,
+            TypeFlags::T_W0 | TypeFlags::T_N4,
+            0x7B,
+        )
+    }
+
+    fn vcvt_signed_scalar_to_int(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        prefix: TypeFlags,
+        tuple: TypeFlags,
+        control: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_reg() || !matches!(dst.get_bit(), 32 | 64) {
+            return Err(Error::BadCombination);
+        }
+        let width = if dst.is_bit(64) {
+            TypeFlags::T_W1 | TypeFlags::T_EW1
+        } else {
+            TypeFlags::T_W0
+        };
+        self.op_avx_x_x_xm(
+            Reg::xmm(dst.get_idx()),
+            Reg::xmm(0),
+            src,
+            prefix | TypeFlags::T_0F | width | TypeFlags::T_EVEX | tuple | control,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vcvtsd2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F2,
+            TypeFlags::T_N4,
+            TypeFlags::T_ER_X,
+            0x2D,
+        )
+    }
+
+    pub fn vcvtss2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F3,
+            TypeFlags::T_N8,
+            TypeFlags::T_ER_X,
+            0x2D,
+        )
+    }
+
+    pub fn vcvttsd2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F2,
+            TypeFlags::T_N4,
+            TypeFlags::T_SAE_X,
+            0x2C,
+        )
+    }
+
+    pub fn vcvttss2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_signed_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_F3,
+            TypeFlags::T_N8,
+            TypeFlags::T_SAE_X,
+            0x2C,
+        )
+    }
+
+    fn vcvt_evex_scalar_to_int(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        type_: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_reg() || !matches!(dst.get_bit(), 32 | 64) {
+            return Err(Error::BadCombination);
+        }
+        let width = if dst.is_bit(64) {
+            TypeFlags::T_EW1
+        } else {
+            TypeFlags::T_W0
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&Reg::xmm(0)),
+            &src.into(),
+            type_ | width | TypeFlags::T_MUST_EVEX,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vcvtsd2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N8 | TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_ER_X,
+            0x79,
+        )
+    }
+
+    pub fn vcvtss2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N4 | TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ER_X,
+            0x79,
+        )
+    }
+
+    pub fn vcvttsd2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N8 | TypeFlags::T_F2 | TypeFlags::T_0F | TypeFlags::T_SAE_X,
+            0x78,
+        )
+    }
+
+    pub fn vcvttss2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N4 | TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_SAE_X,
+            0x78,
+        )
+    }
+
+    pub fn vcvtsh2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_ER_X,
+            0x2D,
+        )
+    }
+
+    pub fn vcvtsh2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_ER_X,
+            0x79,
+        )
+    }
+
+    pub fn vcvttsh2si(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_SAE_X,
+            0x2C,
+        )
+    }
+
+    pub fn vcvttsh2usi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_evex_scalar_to_int(
+            dst,
+            src,
+            TypeFlags::T_N2 | TypeFlags::T_F3 | TypeFlags::T_MAP5 | TypeFlags::T_SAE_X,
+            0x78,
+        )
+    }
+
+    fn vcvt_int_to_scalar_half(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        opcode: u8,
+    ) -> Result<()> {
+        let src = src.into();
+        if !dst.is_xmm() || !merge.is_xmm() || !matches!(src.get_bit(), 32 | 64) {
+            return Err(Error::BadCombination);
+        }
+        let width = if src.get_bit() == 32 {
+            TypeFlags::T_W0 | TypeFlags::T_N4
+        } else {
+            TypeFlags::T_EW1 | TypeFlags::T_N8
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&merge),
+            &src,
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_ER_R
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K
+                | width,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vcvtsi2sh(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_int_to_scalar_half(dst, merge, src, 0x2A)
+    }
+
+    pub fn vcvtusi2sh(&mut self, dst: Reg, merge: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.vcvt_int_to_scalar_half(dst, merge, src, 0x7B)
+    }
 
     /// `vaddps xmm/ymm, xmm/ymm, xmm/ymm/m`
     #[inline]
@@ -2524,7 +5303,7 @@ impl CodeAssembler {
         let code = if src_bit == 8 { 0xF0u8 } else { 0xF1u8 };
         let mut type_ = TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_ALLOW_DIFF_SIZE;
         if src_bit == 16 {
-            type_ = type_ | TypeFlags::T_66;
+            type_ |= TypeFlags::T_66;
         }
         match &src {
             RegMem::Reg(s) => self.buf.op_rr(&dst, s, type_, code),
@@ -2747,9 +5526,301 @@ impl CodeAssembler {
         self.buf.db(0xF9)
     }
     #[inline]
+    pub fn clzero(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xFC)
+    }
+    #[inline]
+    pub fn endbr32(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x1E)?;
+        self.buf.db(0xFB)
+    }
+    #[inline]
+    pub fn endbr64(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x1E)?;
+        self.buf.db(0xFA)
+    }
+    #[inline]
+    pub fn monitor(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xC8)
+    }
+    #[inline]
+    pub fn monitorx(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xFA)
+    }
+    #[inline]
+    pub fn mwait(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xC9)
+    }
+    #[inline]
+    pub fn mwaitx(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xFB)
+    }
+    #[inline]
+    pub fn rdmsr(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x32)
+    }
+    #[inline]
+    pub fn rdpmc(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x33)
+    }
+    #[inline]
+    pub fn rdrand(&mut self, reg: Reg) -> Result<()> {
+        if reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::new(6, crate::operand::Kind::Reg, reg.get_bit()),
+            &reg,
+            TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+    #[inline]
+    pub fn rdseed(&mut self, reg: Reg) -> Result<()> {
+        if reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::new(7, crate::operand::Kind::Reg, reg.get_bit()),
+            &reg,
+            TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+    #[inline]
+    pub fn rdfsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(0),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn rdgsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(1),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn wrfsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(2),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn wrgsbase(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || !(reg.is_bit(32) || reg.is_bit(64)) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(3),
+            &reg,
+            TypeFlags::T_F3 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    #[inline]
+    pub fn senduipi(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(64) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg.cvt32()?,
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            0xC7,
+        )
+    }
+    #[inline]
+    pub fn serialize(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xE8)
+    }
+    #[inline]
+    pub fn stac(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xCB)
+    }
+    #[inline]
+    pub fn syscall(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x05)
+    }
+    #[inline]
+    pub fn sysenter(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x34)
+    }
+    #[inline]
+    pub fn sysexit(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x35)
+    }
+    #[inline]
+    pub fn sysret(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x07)
+    }
+    #[inline]
+    pub fn wbinvd(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x09)
+    }
+    #[inline]
+    pub fn wrmsr(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x30)
+    }
+    #[inline]
+    pub fn xabort(&mut self, imm: u8) -> Result<()> {
+        self.buf.db(0xC6)?;
+        self.buf.db(0xF8)?;
+        self.buf.db(imm)
+    }
+    #[inline]
+    pub fn xbegin(&mut self, rel: u32) -> Result<()> {
+        self.buf.db(0xC7)?;
+        self.buf.db(0xF8)?;
+        self.buf.dd(rel)
+    }
+    #[inline]
+    pub fn xend(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xD5)
+    }
+    #[inline]
+    pub fn xgetbv(&mut self) -> Result<()> {
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xD0)
+    }
+    #[inline]
+    pub fn xlatb(&mut self) -> Result<()> {
+        self.buf.db(0xD7)
+    }
+    #[inline]
+    pub fn xresldtrk(&mut self) -> Result<()> {
+        self.buf.db(0xF2)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xE9)
+    }
+    #[inline]
+    pub fn xsusldtrk(&mut self) -> Result<()> {
+        self.buf.db(0xF2)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xE8)
+    }
+    #[inline]
+    pub fn clui(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xEE)
+    }
+    #[inline]
+    pub fn stui(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xEF)
+    }
+    #[inline]
+    pub fn testui(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xED)
+    }
+    #[inline]
+    pub fn uiret(&mut self) -> Result<()> {
+        self.buf.db(0xF3)?;
+        self.buf.db(0x0F)?;
+        self.buf.db(0x01)?;
+        self.buf.db(0xEC)
+    }
+    #[inline]
     pub fn pause(&mut self) -> Result<()> {
         self.buf.db(0xF3)?;
         self.buf.db(0x90)
+    }
+    /// `tpause r32` — 66 0F AE /6, with REX2 for r16d-r31d.
+    #[inline]
+    pub fn tpause(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(32) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg,
+            TypeFlags::T_66 | TypeFlags::T_0F,
+            0xAE,
+        )
+    }
+    /// `umonitor r16/r32/r64` — F3 0F AE /6.
+    #[inline]
+    pub fn umonitor(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg() || reg.is_bit(8) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        if reg.is_bit(32) {
+            self.buf.db(0x67)?;
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg.cvt32()?,
+            TypeFlags::T_F3 | TypeFlags::T_0F,
+            0xAE,
+        )
+    }
+    /// `umwait r32` — F2 0F AE /6, with REX2 for r16d-r31d.
+    #[inline]
+    pub fn umwait(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(32) {
+            return Err(Error::BadSizeOfRegister);
+        }
+        self.buf.op_rr(
+            &Reg::gpr32(6),
+            &reg,
+            TypeFlags::T_F2 | TypeFlags::T_0F,
+            0xAE,
+        )
     }
     #[inline]
     pub fn lock(&mut self) -> Result<()> {
@@ -2802,8 +5873,16 @@ impl CodeAssembler {
         self.buf.db(0x9D)
     }
     #[inline]
+    pub fn popfq(&mut self) -> Result<()> {
+        self.popf()
+    }
+    #[inline]
     pub fn pushf(&mut self) -> Result<()> {
         self.buf.db(0x9C)
+    }
+    #[inline]
+    pub fn pushfq(&mut self) -> Result<()> {
+        self.pushf()
     }
     #[inline]
     pub fn stmxcsr(&mut self, addr: Address) -> Result<()> {
@@ -2924,6 +6003,10 @@ impl CodeAssembler {
     #[inline]
     pub fn cmpsw(&mut self) -> Result<()> {
         self.buf.db(0x66)?;
+        self.buf.db(0xA7)
+    }
+    #[inline]
+    pub fn cmpsd_string(&mut self) -> Result<()> {
         self.buf.db(0xA7)
     }
     #[inline]
@@ -3325,15 +6408,39 @@ impl CodeAssembler {
             Some(imm),
         )
     }
-    /// `vpextrw r32, xmm, imm8` — VEX.128.66.0F C5 /r ib
+    /// `vpextrw r16/r32/r64/m16, xmm, imm8`
     #[inline]
-    pub fn vpextrw(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+    pub fn vpextrw(&mut self, dst: impl Into<RegMem>, src: Reg, imm: u8) -> Result<()> {
+        let dst = dst.into();
+        let valid_dst = match dst {
+            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.get_bit(), 16 | 32 | 64),
+            RegMem::Mem(_) => true,
+        };
+        if !valid_dst || !src.is_xmm() {
+            return Err(Error::BadCombination);
+        }
+
+        // Xbyak uses the compact VEX.66.0F C5 form only when both register
+        // indices fit below 16. EGPR and memory destinations use 0F3A 15.
+        if let RegMem::Reg(reg) = dst {
+            if src.get_idx() < 16 && reg.get_idx() < 16 {
+                return self.buf.op_vex(
+                    &Reg::xmm(reg.get_idx()),
+                    Some(&Reg::xmm(0)),
+                    &RegMem::Reg(src),
+                    TypeFlags::T_66 | TypeFlags::T_0F,
+                    0xC5,
+                    Some(imm),
+                );
+            }
+        }
+
         self.buf.op_vex(
-            &dst,
+            &src,
             None,
-            &RegMem::Reg(src),
-            TypeFlags::T_66 | TypeFlags::T_0F,
-            0xC5,
+            &dst,
+            TypeFlags::T_66 | TypeFlags::T_0F3A | TypeFlags::T_EVEX | TypeFlags::T_N2,
+            0x15,
             Some(imm),
         )
     }
@@ -3723,69 +6830,100 @@ impl CodeAssembler {
         self.buf.db(0xC8 + (reg.get_idx() & 7))
     }
 
-    /// `rorx r32/r64, r/m32/r/m64, imm8` — VEX.LZ.F2.0F3A.F0 /r ib.
-    ///
-    /// RORX is kept as a hand-written size-dependent encoder: unlike the
-    /// generated SIMD tables, VEX.W follows the scalar destination width.
+    fn bmi_op_rro(
+        &mut self,
+        dst: Reg,
+        reg: Reg,
+        op: RegMem,
+        flags: TypeFlags,
+        opcode: u8,
+        imm8: Option<u8>,
+    ) -> Result<()> {
+        if !dst.is_reg()
+            || (!dst.is_bit(32) && !dst.is_bit(64))
+            || !reg.is_reg()
+            || (!reg.is_bit(32) && !reg.is_bit(64))
+        {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_rro(&dst, &reg, &op, flags, opcode, imm8)
+    }
+
+    /// `rorx r32/r64, r/m32/r/m64, imm8` — VEX/APX.LZ.F2.0F3A.F0 /r ib.
     #[inline]
     pub fn rorx(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
-        if !dst.is_bit(32) && !dst.is_bit(64) {
-            return Err(Error::BadCombination);
-        }
-        let src = src.into();
-        if let RegMem::Reg(src_reg) = src {
-            if src_reg.get_bit() != dst.get_bit() {
-                return Err(Error::BadCombination);
-            }
-        }
-        let mut flags = TypeFlags::T_F2 | TypeFlags::T_0F3A;
-        flags = flags
-            | if dst.is_bit(64) {
-                TypeFlags::T_W1
-            } else {
-                TypeFlags::T_W0
-            };
-        self.buf.op_vex(&dst, None, &src, flags, 0xF0, Some(imm))
+        let bit = dst.get_bit();
+        self.bmi_op_rro(
+            dst,
+            Reg::new(0, crate::operand::Kind::Reg, bit),
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F3A,
+            0xF0,
+            Some(imm),
+        )
     }
 
-    fn bmi_vex_flags(dst: Reg, mandatory_prefix: TypeFlags) -> Result<TypeFlags> {
-        if !dst.is_bit(32) && !dst.is_bit(64) {
+    fn bmi_rro(
+        &mut self,
+        dst: Reg,
+        src: RegMem,
+        extension: u8,
+        prefix: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_reg() || (!dst.is_bit(32) && !dst.is_bit(64)) {
             return Err(Error::BadCombination);
         }
-        Ok(TypeFlags::T_0F38
-            | mandatory_prefix
-            | if dst.is_bit(64) {
-                TypeFlags::T_W1
-            } else {
-                TypeFlags::T_W0
-            })
+        let extension = Reg::new(extension, crate::operand::Kind::Reg, dst.get_bit());
+        self.buf.op_rro(
+            &extension,
+            &dst,
+            &src,
+            TypeFlags::T_APX | TypeFlags::T_0F38 | prefix,
+            opcode,
+            None,
+        )
     }
 
-    fn check_bmi_reg_width(dst: Reg, reg: Reg) -> Result<()> {
-        if reg.get_bit() != dst.get_bit() {
-            return Err(Error::BadCombination);
-        }
-        Ok(())
+    /// `blsi r32/r64, r/m32/r/m64` — extract lowest set bit.
+    #[inline]
+    pub fn blsi(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_rro(dst, src.into(), 3, TypeFlags::T_NF, 0xF3)
     }
 
-    fn check_bmi_rm_width(dst: Reg, operand: &RegMem) -> Result<()> {
-        if let RegMem::Reg(reg) = operand {
-            Self::check_bmi_reg_width(dst, *reg)?;
-        }
-        Ok(())
+    /// `blsmsk r32/r64, r/m32/r/m64` — mask through lowest set bit.
+    #[inline]
+    pub fn blsmsk(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_rro(dst, src.into(), 2, TypeFlags::T_NF, 0xF3)
+    }
+
+    /// `blsr r32/r64, r/m32/r/m64` — reset lowest set bit.
+    #[inline]
+    pub fn blsr(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_rro(dst, src.into(), 1, TypeFlags::T_NF, 0xF3)
+    }
+
+    /// `mulx r32/r64, r32/r64, r/m32/r/m64` — flagless multiply.
+    #[inline]
+    pub fn mulx(&mut self, dst1: Reg, dst2: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.bmi_op_rro(
+            dst1,
+            dst2,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F38,
+            0xF6,
+            None,
+        )
     }
 
     /// `shlx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.66.0F38.F7 /r.
     #[inline]
     pub fn shlx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, shift)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&shift),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::T_66)?,
+        self.bmi_op_rro(
+            dst,
+            shift,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_66 | TypeFlags::T_0F38,
             0xF7,
             None,
         )
@@ -3794,14 +6932,11 @@ impl CodeAssembler {
     /// `shrx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.F2.0F38.F7 /r.
     #[inline]
     pub fn shrx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, shift)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&shift),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F2)?,
+        self.bmi_op_rro(
+            dst,
+            shift,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F38,
             0xF7,
             None,
         )
@@ -3810,14 +6945,11 @@ impl CodeAssembler {
     /// `sarx r32/r64, r/m32/r/m64, r32/r64` — VEX.NDD.LZ.F3.0F38.F7 /r.
     #[inline]
     pub fn sarx(&mut self, dst: Reg, src: impl Into<RegMem>, shift: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, shift)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&shift),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F3)?,
+        self.bmi_op_rro(
+            dst,
+            shift,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_F3 | TypeFlags::T_0F38,
             0xF7,
             None,
         )
@@ -3826,14 +6958,11 @@ impl CodeAssembler {
     /// `andn r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.0F38.F2 /r.
     #[inline]
     pub fn andn(&mut self, dst: Reg, inverted: Reg, value: impl Into<RegMem>) -> Result<()> {
-        let value = value.into();
-        Self::check_bmi_reg_width(dst, inverted)?;
-        Self::check_bmi_rm_width(dst, &value)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&inverted),
-            &value,
-            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+        self.bmi_op_rro(
+            dst,
+            inverted,
+            value.into(),
+            TypeFlags::T_APX | TypeFlags::T_0F38 | TypeFlags::T_NF,
             0xF2,
             None,
         )
@@ -3842,14 +6971,11 @@ impl CodeAssembler {
     /// `bextr r32/r64, r/m32/r/m64, r32/r64` — VEX.NDS.LZ.0F38.F7 /r.
     #[inline]
     pub fn bextr(&mut self, dst: Reg, src: impl Into<RegMem>, control: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, control)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&control),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+        self.bmi_op_rro(
+            dst,
+            control,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_0F38 | TypeFlags::T_NF,
             0xF7,
             None,
         )
@@ -3858,14 +6984,11 @@ impl CodeAssembler {
     /// `bzhi r32/r64, r/m32/r/m64, r32/r64` — VEX.NDS.LZ.0F38.F5 /r.
     #[inline]
     pub fn bzhi(&mut self, dst: Reg, src: impl Into<RegMem>, index: Reg) -> Result<()> {
-        let src = src.into();
-        Self::check_bmi_reg_width(dst, index)?;
-        Self::check_bmi_rm_width(dst, &src)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&index),
-            &src,
-            Self::bmi_vex_flags(dst, TypeFlags::NONE)?,
+        self.bmi_op_rro(
+            dst,
+            index,
+            src.into(),
+            TypeFlags::T_APX | TypeFlags::T_0F38 | TypeFlags::T_NF,
             0xF5,
             None,
         )
@@ -3874,14 +6997,11 @@ impl CodeAssembler {
     /// `pdep r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.F2.0F38.F5 /r.
     #[inline]
     pub fn pdep(&mut self, dst: Reg, src: Reg, mask: impl Into<RegMem>) -> Result<()> {
-        let mask = mask.into();
-        Self::check_bmi_reg_width(dst, src)?;
-        Self::check_bmi_rm_width(dst, &mask)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&src),
-            &mask,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F2)?,
+        self.bmi_op_rro(
+            dst,
+            src,
+            mask.into(),
+            TypeFlags::T_APX | TypeFlags::T_F2 | TypeFlags::T_0F38,
             0xF5,
             None,
         )
@@ -3890,17 +7010,96 @@ impl CodeAssembler {
     /// `pext r32/r64, r32/r64, r/m32/r/m64` — VEX.NDS.LZ.F3.0F38.F5 /r.
     #[inline]
     pub fn pext(&mut self, dst: Reg, src: Reg, mask: impl Into<RegMem>) -> Result<()> {
-        let mask = mask.into();
-        Self::check_bmi_reg_width(dst, src)?;
-        Self::check_bmi_rm_width(dst, &mask)?;
-        self.buf.op_vex(
-            &dst,
-            Some(&src),
-            &mask,
-            Self::bmi_vex_flags(dst, TypeFlags::T_F3)?,
+        self.bmi_op_rro(
+            dst,
+            src,
+            mask.into(),
+            TypeFlags::T_APX | TypeFlags::T_F3 | TypeFlags::T_0F38,
             0xF5,
             None,
         )
+    }
+
+    fn aes_kl(&mut self, dst: Reg, addr: Address, opcode: u8) -> Result<()> {
+        if !dst.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_sse_apx(
+            &dst,
+            &RegMem::Mem(addr),
+            TypeFlags::T_F3 | TypeFlags::T_0F38,
+            opcode,
+            TypeFlags::T_F3 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            None,
+        )
+    }
+
+    /// `aesdec128kl xmm, m384` — decrypt a 128-bit Key Locker handle.
+    #[inline]
+    pub fn aesdec128kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDD)
+    }
+
+    /// `aesdec256kl xmm, m512` — decrypt a 256-bit Key Locker handle.
+    #[inline]
+    pub fn aesdec256kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDF)
+    }
+
+    /// `aesdecwide128kl m384` — wide 128-bit Key Locker decryption.
+    #[inline]
+    pub fn aesdecwide128kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(1), addr, 0xD8)
+    }
+
+    /// `aesdecwide256kl m512` — wide 256-bit Key Locker decryption.
+    #[inline]
+    pub fn aesdecwide256kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(3), addr, 0xD8)
+    }
+
+    /// `aesenc128kl xmm, m384` — encrypt a 128-bit Key Locker handle.
+    #[inline]
+    pub fn aesenc128kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDC)
+    }
+
+    /// `aesenc256kl xmm, m512` — encrypt a 256-bit Key Locker handle.
+    #[inline]
+    pub fn aesenc256kl(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.aes_kl(dst, addr, 0xDE)
+    }
+
+    /// `aesencwide128kl m384` — wide 128-bit Key Locker encryption.
+    #[inline]
+    pub fn aesencwide128kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(0), addr, 0xD8)
+    }
+
+    /// `aesencwide256kl m512` — wide 256-bit Key Locker encryption.
+    #[inline]
+    pub fn aesencwide256kl(&mut self, addr: Address) -> Result<()> {
+        self.aes_kl(Reg::xmm(2), addr, 0xD8)
+    }
+
+    fn encode_key(&mut self, src: Reg, dst: Reg, code1: u8, code2: u8) -> Result<()> {
+        if !src.is_reg_bit(32) || !dst.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_encode_key(&src, &dst, code1, code2)
+    }
+
+    /// `encodekey128 r32, r32` — encode a 128-bit Key Locker key.
+    #[inline]
+    pub fn encodekey128(&mut self, src: Reg, dst: Reg) -> Result<()> {
+        self.encode_key(src, dst, 0xFA, 0xDA)
+    }
+
+    /// `encodekey256 r32, r32` — encode a 256-bit Key Locker key.
+    #[inline]
+    pub fn encodekey256(&mut self, src: Reg, dst: Reg) -> Result<()> {
+        self.encode_key(src, dst, 0xFB, 0xDB)
     }
 
     /// Emit an EVEX narrowing move whose architectural destination is encoded
@@ -3964,6 +7163,50 @@ impl CodeAssembler {
     #[inline]
     pub fn vpmovq2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
         self.vpmov_to_mask(dst, src, TypeFlags::T_EW1, 0x39)
+    }
+
+    /// `vpmovd2m k, xmm/ymm/zmm` — EVEX.F3.0F38.W0 39 /r.
+    #[inline]
+    pub fn vpmovd2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_to_mask(dst, src, TypeFlags::T_W0, 0x39)
+    }
+
+    /// `vpmovw2m k, xmm/ymm/zmm` — EVEX.F3.0F38.W1 29 /r.
+    #[inline]
+    pub fn vpmovw2m(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_to_mask(dst, src, TypeFlags::T_EW1, 0x29)
+    }
+
+    /// Emit an EVEX opmask-to-vector expansion.
+    #[inline]
+    fn vpmov_from_mask(&mut self, dst: Reg, src: Reg, flags: TypeFlags, opcode: u8) -> Result<()> {
+        if !dst.is_simd() || !src.is_opmask() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_F3 | TypeFlags::T_0F38 | TypeFlags::T_MUST_EVEX | TypeFlags::T_YMM | flags,
+            opcode,
+            None,
+        )
+    }
+
+    pub fn vpmovm2b(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_W0, 0x28)
+    }
+
+    pub fn vpmovm2d(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_W0, 0x38)
+    }
+
+    pub fn vpmovm2q(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_EW1, 0x38)
+    }
+
+    pub fn vpmovm2w(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        self.vpmov_from_mask(dst, src, TypeFlags::T_EW1, 0x28)
     }
 
     // ── MOVSS / MOVSD (special: reg,reg uses different pattern than reg,mem) ─
@@ -4098,38 +7341,141 @@ impl CodeAssembler {
     #[inline]
     pub fn prefetchnta(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(0, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
     }
     /// `prefetcht0 [m]` — 0F 18 /1
     #[inline]
     pub fn prefetcht0(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(1, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
     }
     /// `prefetcht1 [m]` — 0F 18 /2
     #[inline]
     pub fn prefetcht1(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(2, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
     }
     /// `prefetcht2 [m]` — 0F 18 /3
     #[inline]
     pub fn prefetcht2(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(3, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0x18)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchrst2 [m]` — 0F 18 /4
+    #[inline]
+    pub fn prefetchrst2(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(4, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchit1 [m]` — 0F 18 /6
+    #[inline]
+    pub fn prefetchit1(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(6, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchit0 [m]` — 0F 18 /7
+    #[inline]
+    pub fn prefetchit0(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(7, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x18,
+        )
+    }
+    /// `prefetchw [m]` — 0F 0D /1
+    #[inline]
+    pub fn prefetchw(&mut self, addr: Address) -> Result<()> {
+        let r = Reg::new(1, crate::operand::Kind::Reg, 32);
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x0D,
+        )
     }
     /// `clflush [m]` — 0F AE /7
     #[inline]
     pub fn clflush(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(7, crate::operand::Kind::Reg, 32);
-        self.buf.op_mr(&addr, &r, TypeFlags::T_0F, 0xAE)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
     }
     /// `clflushopt [m]` — 66 0F AE /7
     #[inline]
     pub fn clflushopt(&mut self, addr: Address) -> Result<()> {
         let r = Reg::new(7, crate::operand::Kind::Reg, 32);
-        self.buf
-            .op_mr(&addr, &r, TypeFlags::T_66 | TypeFlags::T_0F, 0xAE)
+        self.buf.op_mr(
+            &addr,
+            &r,
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    /// `cldemote [m]` — 0F 1C /0
+    #[inline]
+    pub fn cldemote(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr32(0),
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0x1C,
+        )
+    }
+    /// `clwb [m]` — 66 0F AE /6
+    #[inline]
+    pub fn clwb(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr32(6),
+            TypeFlags::T_66 | TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    /// `movrs r8/r16/r32/r64, [m]` — 0F 38 8A/8B /r
+    #[inline]
+    pub fn movrs(&mut self, reg: Reg, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &reg,
+            TypeFlags::T_0F38,
+            if reg.is_bit(8) { 0x8A } else { 0x8B },
+        )
     }
 
     // ── MOVMSKPS / MOVMSKPD ──────────────────────────────────
@@ -4464,6 +7810,177 @@ impl CodeAssembler {
         )
     }
 
+    fn vector_extension_reg(like: Reg, index: u8) -> Result<Reg> {
+        if like.is_zmm() {
+            Ok(Reg::zmm(index))
+        } else if like.is_ymm() {
+            Ok(Reg::ymm(index))
+        } else if like.is_xmm() {
+            Ok(Reg::xmm(index))
+        } else {
+            Err(Error::BadCombination)
+        }
+    }
+
+    fn vex_vector_shift_imm(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        extension: u8,
+        type_: TypeFlags,
+        opcode: u8,
+        imm: u8,
+    ) -> Result<()> {
+        let extension = Self::vector_extension_reg(dst, extension)?;
+        self.op_avx_x_x_xm(extension, dst, src, type_, opcode, Some(imm))
+    }
+
+    /// `vpslldq xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`.
+    pub fn vpslldq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_shift_imm(
+            dst,
+            src,
+            7,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
+    /// `vpsrldq xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`.
+    pub fn vpsrldq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_shift_imm(
+            dst,
+            src,
+            3,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
+    fn vex_vector_rotate_imm(
+        &mut self,
+        dst: Reg,
+        src: impl Into<RegMem>,
+        extension: u8,
+        width: TypeFlags,
+        imm: u8,
+    ) -> Result<()> {
+        self.vex_vector_shift_imm(
+            dst,
+            src,
+            extension,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | width
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | if width == TypeFlags::T_W0 {
+                    TypeFlags::T_B32
+                } else {
+                    TypeFlags::T_B64
+                },
+            0x72,
+            imm,
+        )
+    }
+
+    pub fn vprold(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 1, TypeFlags::T_W0, imm)
+    }
+
+    pub fn vprolq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 1, TypeFlags::T_EW1, imm)
+    }
+
+    pub fn vprord(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 0, TypeFlags::T_W0, imm)
+    }
+
+    pub fn vprorq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        self.vex_vector_rotate_imm(dst, src, 0, TypeFlags::T_EW1, imm)
+    }
+
+    fn vshuffle_x4(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        width: TypeFlags,
+        opcode: u8,
+        imm: u8,
+    ) -> Result<()> {
+        if !(dst.is_ymm() || dst.is_zmm()) || !(merge.is_ymm() || merge.is_zmm()) {
+            return Err(Error::BadCombination);
+        }
+        self.op_avx_x_x_xm(
+            dst,
+            merge,
+            src,
+            TypeFlags::T_66
+                | TypeFlags::T_0F3A
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | width
+                | if width == TypeFlags::T_W0 {
+                    TypeFlags::T_B32
+                } else {
+                    TypeFlags::T_B64
+                },
+            opcode,
+            Some(imm),
+        )
+    }
+
+    pub fn vshuff32x4(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_W0, 0x23, imm)
+    }
+
+    pub fn vshuff64x2(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_EW1, 0x23, imm)
+    }
+
+    pub fn vshufi32x4(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_W0, 0x43, imm)
+    }
+
+    pub fn vshufi64x2(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: impl Into<RegMem>,
+        imm: u8,
+    ) -> Result<()> {
+        self.vshuffle_x4(dst, merge, src, TypeFlags::T_EW1, 0x43, imm)
+    }
+
     /// `vpsllw xmm/ymm, xmm/ymm, imm8` — VEX.66.0F 71 /6 ib
     #[inline]
     pub fn vpsllw_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
@@ -4524,6 +8041,25 @@ impl CodeAssembler {
             dst,
             src,
             6,
+            TypeFlags::T_66
+                | TypeFlags::T_0F
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_EVEX
+                | TypeFlags::T_B64
+                | TypeFlags::T_MEM_EVEX,
+            0x73,
+            imm,
+        )
+    }
+
+    /// `vpsrlq xmm/ymm/zmm, xmm/ymm/zmm, imm8` — VEX/EVEX.66.0F.W1 73 /2 ib
+    #[inline]
+    pub fn vpsrlq_imm(&mut self, dst: Reg, src: Reg, imm: u8) -> Result<()> {
+        self.vex_packed_shift_imm(
+            dst,
+            src,
+            2,
             TypeFlags::T_66
                 | TypeFlags::T_0F
                 | TypeFlags::T_EW1
@@ -5119,6 +8655,38 @@ impl CodeAssembler {
         self.buf.emit_addr(addr, r.get_idx())
     }
 
+    /// Xbyak `opFpuMem`: select the escape byte from the declared memory size.
+    #[allow(clippy::too_many_arguments)]
+    fn fpu_mem_by_size(
+        &mut self,
+        addr: &Address,
+        m16: u8,
+        m32: u8,
+        m64: u8,
+        mut ext: u8,
+        m64_ext: u8,
+    ) -> Result<()> {
+        if addr.is_64bit_disp() {
+            return Err(Error::CantUse64BitDisp);
+        }
+        let code = match addr.get_bit() {
+            16 => m16,
+            32 => m32,
+            64 => m64,
+            _ => 0,
+        };
+        if code == 0 {
+            return Err(Error::BadMemSize);
+        }
+        if m64_ext != 0 && addr.get_bit() == 64 {
+            ext = m64_ext;
+        }
+        self.buf
+            .emit_rex_for_reg_mem(&Reg::fpu(0), addr, TypeFlags::NONE)?;
+        self.buf.db(code)?;
+        self.buf.emit_addr(addr, ext)
+    }
+
     // ── FLD / FST / FSTP ──────────────────────────────────────
     /// `fld st(i)` — D9 C0+i
     #[inline]
@@ -5447,6 +9015,12 @@ impl CodeAssembler {
         self.buf.db(0xD9)?;
         self.buf.db(0xFE)
     }
+    /// `fsincos` — D9 FB
+    #[inline]
+    pub fn fsincos(&mut self) -> Result<()> {
+        self.buf.db(0xD9)?;
+        self.buf.db(0xFB)
+    }
     /// `fcos` — D9 FF
     #[inline]
     pub fn fcos(&mut self) -> Result<()> {
@@ -5583,6 +9157,10 @@ impl CodeAssembler {
     pub fn fwait(&mut self) -> Result<()> {
         self.buf.db(0x9B)
     }
+    #[inline]
+    pub fn wait(&mut self) -> Result<()> {
+        self.fwait()
+    }
     /// `finit` — 9B DB E3
     #[inline]
     pub fn finit(&mut self) -> Result<()> {
@@ -5629,6 +9207,89 @@ impl CodeAssembler {
         self.buf.db(0x9B)?;
         self.buf.db(0xDF)?;
         self.buf.db(0xE0)
+    }
+    /// `fstsw m16` — 9B DD /7
+    #[inline]
+    pub fn fstsw(&mut self, addr: Address) -> Result<()> {
+        self.buf.db(0x9B)?;
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(7), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDD)
+    }
+    /// Xbyak's register overload accepts AX and rejects every other Reg16.
+    #[inline]
+    pub fn fstsw_reg(&mut self, reg: Reg) -> Result<()> {
+        if !reg.is_reg_bit(16) || reg.get_idx() != 0 {
+            return Err(Error::BadParameter);
+        }
+        self.fstsw_ax()
+    }
+    /// `fbld m80bcd` — DF /4
+    #[inline]
+    pub fn fbld(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(4), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDF)
+    }
+    /// `fbstp m80bcd` — DF /6
+    #[inline]
+    pub fn fbstp(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(6), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDF)
+    }
+    /// `fldenv [mem]` — D9 /4
+    #[inline]
+    pub fn fldenv(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(4), TypeFlags::T_ALLOW_DIFF_SIZE, 0xD9)
+    }
+    /// `fnsave [mem]` — DD /6
+    #[inline]
+    pub fn fnsave(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(6), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDD)
+    }
+    /// `fnstenv [mem]` — D9 /6
+    #[inline]
+    pub fn fnstenv(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(6), TypeFlags::T_ALLOW_DIFF_SIZE, 0xD9)
+    }
+    /// `frstor [mem]` — DD /4
+    #[inline]
+    pub fn frstor(&mut self, addr: Address) -> Result<()> {
+        self.buf
+            .op_mr(&addr, &Reg::gpr32(4), TypeFlags::T_ALLOW_DIFF_SIZE, 0xDD)
+    }
+    /// `fsave [mem]` — WAIT + DD /6
+    #[inline]
+    pub fn fsave(&mut self, addr: Address) -> Result<()> {
+        self.buf.db(0x9B)?;
+        self.fnsave(addr)
+    }
+    /// `fstenv [mem]` — WAIT + D9 /6
+    #[inline]
+    pub fn fstenv(&mut self, addr: Address) -> Result<()> {
+        self.buf.db(0x9B)?;
+        self.fnstenv(addr)
+    }
+    /// `fxrstor [mem]` — 0F AE /1
+    #[inline]
+    pub fn fxrstor(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr32(1),
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
+    }
+    /// `fxrstor64 [mem]` — REX.W + 0F AE /1
+    #[inline]
+    pub fn fxrstor64(&mut self, addr: Address) -> Result<()> {
+        self.buf.op_mr(
+            &addr,
+            &Reg::gpr64(1),
+            TypeFlags::T_0F | TypeFlags::T_ALLOW_DIFF_SIZE,
+            0xAE,
+        )
     }
     /// `fclex` — 9B DB E2
     #[inline]
@@ -5708,6 +9369,16 @@ impl CodeAssembler {
     pub fn fidiv_m32(&mut self, addr: Address) -> Result<()> {
         self.fpu_mem(0xDA, 6, &addr)
     }
+    /// `fidivr m16int/m32int` — DE/DA /7
+    #[inline]
+    pub fn fidivr(&mut self, addr: Address) -> Result<()> {
+        self.fpu_mem_by_size(&addr, 0xDE, 0xDA, 0, 7, 0)
+    }
+    /// `fisubr m16int/m32int` — DE/DA /5
+    #[inline]
+    pub fn fisubr(&mut self, addr: Address) -> Result<()> {
+        self.fpu_mem_by_size(&addr, 0xDE, 0xDA, 0, 5, 0)
+    }
     /// `ficom m16int` — DE /2
     #[inline]
     pub fn ficom_m16(&mut self, addr: Address) -> Result<()> {
@@ -5771,12 +9442,361 @@ impl CodeAssembler {
         self.fpu_st(0xDB, 0xD8, src)
     }
 
+    // ── ACE 1.15 block-scale register ─────────────────────────
+
+    /// `bsrinit bsr0`
+    pub fn bsrinit(&mut self, bsr: Reg) -> Result<()> {
+        if !bsr.is_bsr() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.emit_vex(
+            &bsr,
+            &bsr,
+            None,
+            TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W1,
+            0x49,
+            false,
+        )?;
+        self.buf.set_modrm(3, bsr.get_idx(), 0)
+    }
+
+    /// `bsrmovf bsr0, zmm, zmm/m512`
+    pub fn bsrmovf(&mut self, bsr: Reg, zmm: Reg, op: impl Into<RegMem>) -> Result<()> {
+        if !bsr.is_bsr() || !zmm.is_zmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &bsr,
+            Some(&zmm),
+            &op.into(),
+            TypeFlags::T_MUST_EVEX | TypeFlags::T_MAP6 | TypeFlags::T_EW1 | TypeFlags::T_N1,
+            0x95,
+            None,
+        )
+    }
+
+    /// `bsrmovh bsr0, zmm/m512`
+    pub fn bsrmovh_load(&mut self, bsr: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bsr_move_load(bsr, op.into(), TypeFlags::T_F2)
+    }
+
+    /// `bsrmovh zmm/m512, bsr0`
+    pub fn bsrmovh_store(&mut self, op: impl Into<RegMem>, bsr: Reg) -> Result<()> {
+        self.bsr_move_store(op.into(), bsr, TypeFlags::T_F2)
+    }
+
+    /// `bsrmovl bsr0, zmm/m512`
+    pub fn bsrmovl_load(&mut self, bsr: Reg, op: impl Into<RegMem>) -> Result<()> {
+        self.bsr_move_load(bsr, op.into(), TypeFlags::T_F3)
+    }
+
+    /// `bsrmovl zmm/m512, bsr0`
+    pub fn bsrmovl_store(&mut self, op: impl Into<RegMem>, bsr: Reg) -> Result<()> {
+        self.bsr_move_store(op.into(), bsr, TypeFlags::T_F3)
+    }
+
+    fn bsr_move_load(&mut self, bsr: Reg, op: RegMem, prefix: TypeFlags) -> Result<()> {
+        if !bsr.is_bsr() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &bsr,
+            None,
+            &op,
+            TypeFlags::T_N1
+                | prefix
+                | TypeFlags::T_MAP6
+                | TypeFlags::T_EW1
+                | TypeFlags::T_MUST_EVEX,
+            0x95,
+            None,
+        )
+    }
+
+    fn bsr_move_store(&mut self, op: RegMem, bsr: Reg, prefix: TypeFlags) -> Result<()> {
+        if !bsr.is_bsr() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &bsr,
+            None,
+            &op,
+            TypeFlags::T_N1 | prefix | TypeFlags::T_MAP6 | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            0x95,
+            None,
+        )
+    }
+
     // ═══════════════════════════════════════════════════════════
     // AMX (Advanced Matrix Extensions) tile instructions
     // ═══════════════════════════════════════════════════════════
 
-    // AMX tile arithmetic uses VEX.128.0F38 with tmm register operands.
-    // The VEX vvvv field encodes the third tmm operand.
+    // ACE 1.15 AMX instructions use EVEX with TMM destinations and ZMM
+    // sources. The older AMX instructions below continue to use VEX.128.
+
+    /// Xbyak `opAMX`: preserve the MIB expression and select VEX or APX from
+    /// the address register set.
+    fn op_amx(&mut self, tile: Reg, addr: Address, type_: TypeFlags, opcode: u8) -> Result<()> {
+        if !tile.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        let addr = addr.clone_no_optimize();
+        if opcode != 0x49 {
+            let exp = addr.get_reg_exp();
+            if exp.get_base().get_bit() == 0 || exp.get_index().get_bit() == 0 {
+                return Err(Error::NotSupported);
+            }
+        }
+        if self.buf.op_roo(
+            &Reg::default(),
+            &RegMem::Mem(addr),
+            &RegMem::Reg(tile),
+            TypeFlags::T_APX | type_,
+            opcode,
+            0,
+            None,
+        )? {
+            return Ok(());
+        }
+        self.buf.op_vex(
+            &tile,
+            Some(&Reg::tmm(0)),
+            &RegMem::Mem(addr),
+            type_,
+            opcode,
+            None,
+        )
+    }
+
+    /// `tilemovcol tmm, zmm, r32`
+    pub fn tilemovcol_reg(&mut self, dst: Reg, src: Reg, column: Reg) -> Result<()> {
+        if !dst.is_tmm() || !src.is_zmm() || !column.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&column),
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_EW1 | TypeFlags::T_MUST_EVEX,
+            0x4B,
+            None,
+        )
+    }
+
+    /// `tilemovcol tmm, zmm, imm8`
+    pub fn tilemovcol_imm(&mut self, dst: Reg, src: Reg, column: u8) -> Result<()> {
+        if !dst.is_tmm() || !src.is_zmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F3A | TypeFlags::T_EW1 | TypeFlags::T_MUST_EVEX,
+            0x2F,
+            Some(column),
+        )
+    }
+
+    fn tcvtrow_reg(
+        &mut self,
+        dst: Reg,
+        tile: Reg,
+        row: Reg,
+        prefix: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_zmm() || !tile.is_tmm() || !row.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&row),
+            &RegMem::Reg(tile),
+            prefix | TypeFlags::T_0F38 | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            None,
+        )
+    }
+
+    fn tcvtrow_imm(
+        &mut self,
+        dst: Reg,
+        tile: Reg,
+        row: u8,
+        prefix: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_zmm() || !tile.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(tile),
+            prefix | TypeFlags::T_0F3A | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            Some(row),
+        )
+    }
+
+    pub fn tcvtrowd2ps(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_F3, 0x4A)
+    }
+
+    pub fn tcvtrowd2ps_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F3, 0x07)
+    }
+
+    pub fn tcvtrowps2bf16h(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_F2, 0x6D)
+    }
+
+    pub fn tcvtrowps2bf16h_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F2, 0x07)
+    }
+
+    pub fn tcvtrowps2bf16l(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_F3, 0x6D)
+    }
+
+    pub fn tcvtrowps2bf16l_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F3, 0x77)
+    }
+
+    pub fn tcvtrowps2phh(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::NONE, 0x6D)
+    }
+
+    pub fn tcvtrowps2phh_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::NONE, 0x07)
+    }
+
+    pub fn tcvtrowps2phl(&mut self, dst: Reg, tile: Reg, row: Reg) -> Result<()> {
+        self.tcvtrow_reg(dst, tile, row, TypeFlags::T_66, 0x6D)
+    }
+
+    pub fn tcvtrowps2phl_imm(&mut self, dst: Reg, tile: Reg, row: u8) -> Result<()> {
+        self.tcvtrow_imm(dst, tile, row, TypeFlags::T_F2, 0x77)
+    }
+
+    /// Xbyak's register-index TILEMOVROW overloads in both directions.
+    pub fn tilemovrow(&mut self, dst: Reg, src: Reg, row: Reg) -> Result<()> {
+        if !row.is_reg_bit(32) {
+            return Err(Error::BadCombination);
+        }
+        let width = if dst.is_tmm() && src.is_zmm() {
+            TypeFlags::T_EW1
+        } else if dst.is_zmm() && src.is_tmm() {
+            TypeFlags::T_W0
+        } else {
+            return Err(Error::BadCombination);
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&row),
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F38 | width | TypeFlags::T_MUST_EVEX,
+            0x4A,
+            None,
+        )
+    }
+
+    /// Xbyak's immediate-index TILEMOVROW overloads in both directions.
+    pub fn tilemovrow_imm(&mut self, dst: Reg, src: Reg, row: u8) -> Result<()> {
+        let width = if dst.is_tmm() && src.is_zmm() {
+            TypeFlags::T_EW1
+        } else if dst.is_zmm() && src.is_tmm() {
+            TypeFlags::T_W0
+        } else {
+            return Err(Error::BadCombination);
+        };
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66 | TypeFlags::T_0F3A | width | TypeFlags::T_MUST_EVEX,
+            0x07,
+            Some(row),
+        )
+    }
+
+    /// `top2bf16ps tmm, zmm, zmm`
+    pub fn top2bf16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F3, 0x5C, None)
+    }
+
+    /// `top4bssd tmm, zmm, zmm`
+    pub fn top4bssd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F2, 0x5E, None)
+    }
+
+    /// `top4bsud tmm, zmm, zmm`
+    pub fn top4bsud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F3, 0x5E, None)
+    }
+
+    /// `top4busd tmm, zmm, zmm`
+    pub fn top4busd(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_66, 0x5E, None)
+    }
+
+    /// `top4buud tmm, zmm, zmm`
+    pub fn top4buud(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::NONE, 0x5E, None)
+    }
+
+    /// `top4mxbf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::NONE, 0x8D, Some(imm))
+    }
+
+    /// `top4mxbhf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxbhf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F2, 0x8D, Some(imm))
+    }
+
+    /// `top4mxbssps tmm, zmm, zmm, imm8`
+    pub fn top4mxbssps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F2, 0x8F, Some(imm))
+    }
+
+    /// `top4mxhbf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxhbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_F3, 0x8D, Some(imm))
+    }
+
+    /// `top4mxhf8ps tmm, zmm, zmm, imm8`
+    pub fn top4mxhf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg, imm: u8) -> Result<()> {
+        self.amx_zmm_op(dst, src1, src2, TypeFlags::T_66, 0x8D, Some(imm))
+    }
+
+    fn amx_zmm_op(
+        &mut self,
+        dst: Reg,
+        src1: Reg,
+        src2: Reg,
+        prefix: TypeFlags,
+        opcode: u8,
+        imm: Option<u8>,
+    ) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_zmm() || !src2.is_zmm() {
+            return Err(Error::BadCombination);
+        }
+        let map = if imm.is_some() {
+            TypeFlags::T_0F3A
+        } else {
+            TypeFlags::T_0F38
+        };
+        self.buf.op_vex(
+            &dst,
+            Some(&src2),
+            &RegMem::Reg(src1),
+            prefix | map | TypeFlags::T_W0 | TypeFlags::T_MUST_EVEX,
+            opcode,
+            imm,
+        )
+    }
 
     /// `tilerelease` — VEX.128.NP.0F38.W0 49 C0
     #[inline]
@@ -5813,6 +9833,9 @@ impl CodeAssembler {
         type_: TypeFlags,
         code: u8,
     ) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_tmm() || !src2.is_tmm() {
+            return Err(Error::BadCombination);
+        }
         self.buf.op_vex(
             &dst,
             Some(&src2),
@@ -5854,68 +9877,649 @@ impl CodeAssembler {
         self.amx_tdp(dst, src1, src2, TypeFlags::T_F2, 0x5C)
     }
 
+    fn amx_tdp_map5(&mut self, dst: Reg, src1: Reg, src2: Reg, prefix: TypeFlags) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_tmm() || !src2.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&src2),
+            &RegMem::Reg(src1),
+            prefix | TypeFlags::T_MAP5 | TypeFlags::T_W0,
+            0xFD,
+            None,
+        )
+    }
+
+    /// `tdpbf8ps tmm, tmm, tmm`.
+    pub fn tdpbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::NONE)
+    }
+
+    /// `tdpbhf8ps tmm, tmm, tmm`.
+    pub fn tdpbhf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::T_F2)
+    }
+
+    /// `tdphbf8ps tmm, tmm, tmm`.
+    pub fn tdphbf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::T_F3)
+    }
+
+    /// `tdphf8ps tmm, tmm, tmm`.
+    pub fn tdphf8ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tdp_map5(dst, src1, src2, TypeFlags::T_66)
+    }
+
+    fn amx_tcmm(&mut self, dst: Reg, src1: Reg, src2: Reg, prefix: TypeFlags) -> Result<()> {
+        if !dst.is_tmm() || !src1.is_tmm() || !src2.is_tmm() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            Some(&src2),
+            &RegMem::Reg(src1),
+            prefix | TypeFlags::T_0F38 | TypeFlags::T_W0,
+            0x6C,
+            None,
+        )
+    }
+
+    pub fn tcmmimfp16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tcmm(dst, src1, src2, TypeFlags::T_66)
+    }
+
+    pub fn tcmmrlfp16ps(&mut self, dst: Reg, src1: Reg, src2: Reg) -> Result<()> {
+        self.amx_tcmm(dst, src1, src2, TypeFlags::NONE)
+    }
+
     /// `tileloadd tmm, [base + index*stride]` — VEX.128.F2.0F38.W0 4B /r
     /// Uses SIB-like addressing with base and index*stride.
     #[inline]
     pub fn tileloadd(&mut self, dst: Reg, addr: Address) -> Result<()> {
-        self.buf.op_vex(
-            &dst,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            dst,
+            addr,
             TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x4B,
-            None,
         )
     }
     /// `tileloaddt1 tmm, [base + index*stride]` — VEX.128.66.0F38.W0 4B /r
     #[inline]
     pub fn tileloaddt1(&mut self, dst: Reg, addr: Address) -> Result<()> {
-        self.buf.op_vex(
-            &dst,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            dst,
+            addr,
             TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x4B,
-            None,
+        )
+    }
+
+    /// `tileloaddrs tmm, [base + index*stride]`.
+    pub fn tileloaddrs(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_amx(
+            dst,
+            addr,
+            TypeFlags::T_F2 | TypeFlags::T_0F38 | TypeFlags::T_W0,
+            0x4A,
+        )
+    }
+
+    /// `tileloaddrst1 tmm, [base + index*stride]`.
+    pub fn tileloaddrst1(&mut self, dst: Reg, addr: Address) -> Result<()> {
+        self.op_amx(
+            dst,
+            addr,
+            TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_W0,
+            0x4A,
         )
     }
     /// `tilestored [base + index*stride], tmm` — VEX.128.F3.0F38.W0 4B /r
     #[inline]
     pub fn tilestored(&mut self, addr: Address, src: Reg) -> Result<()> {
-        self.buf.op_vex(
-            &src,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            src,
+            addr,
             TypeFlags::T_F3 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x4B,
-            None,
         )
     }
 
     /// `ldtilecfg [m512]` — VEX.128.NP.0F38.W0 49 /0
     #[inline]
     pub fn ldtilecfg(&mut self, addr: Address) -> Result<()> {
-        let r = Reg::new(0, crate::operand::Kind::Reg, 32);
-        self.buf.op_vex(
-            &r,
-            None,
-            &RegMem::Mem(addr),
-            TypeFlags::T_0F38 | TypeFlags::T_W0,
-            0x49,
-            None,
-        )
+        self.op_amx(Reg::tmm(0), addr, TypeFlags::T_0F38 | TypeFlags::T_W0, 0x49)
     }
     /// `sttilecfg [m512]` — VEX.128.66.0F38.W0 49 /0
     #[inline]
     pub fn sttilecfg(&mut self, addr: Address) -> Result<()> {
-        let r = Reg::new(0, crate::operand::Kind::Reg, 32);
-        self.buf.op_vex(
-            &r,
-            None,
-            &RegMem::Mem(addr),
+        self.op_amx(
+            Reg::tmm(0),
+            addr,
             TypeFlags::T_66 | TypeFlags::T_0F38 | TypeFlags::T_W0,
             0x49,
+        )
+    }
+
+    // ── ACE 1.15 vector conversions ───────────────────────────
+
+    /// `vcvtbf42hf8 xmm/ymm/zmm, xmm/ymm/m`
+    pub fn vcvtbf42hf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt1(
+            dst,
+            src.into(),
+            TypeFlags::T_N8
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x37,
+        )
+    }
+
+    /// `vcvtbf62hf8 xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvtbf62hf8(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x37,
             None,
         )
+    }
+
+    /// `vcvtbf82bf4s xmm/ymm/m, xmm/ymm/zmm`
+    pub fn vcvtbf82bf4s(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_vmov(
+            dst.into(),
+            src,
+            TypeFlags::T_N8
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3D,
+            true,
+        )
+    }
+
+    /// `vcvtbf82bf6s xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvtbf82bf6s(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &src,
+            None,
+            &RegMem::Reg(dst),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3E,
+            None,
+        )
+    }
+
+    /// `vcvtbf82ps xmm/ymm/zmm, xmm/m`
+    pub fn vcvtbf82ps(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_vmov(
+            src.into(),
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_EW1
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x36,
+            false,
+        )
+    }
+
+    /// `vcvtbiasps2bf8 xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2bf8(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x39,
+        )
+    }
+
+    /// `vcvtbiasps2bf8s xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2bf8s(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3B,
+        )
+    }
+
+    /// `vcvtbiasps2hf8 xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2hf8(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x38,
+        )
+    }
+
+    /// `vcvtbiasps2hf8s xmm, xmm/ymm/zmm, xmm/ymm/zmm/m`
+    pub fn vcvtbiasps2hf8s(&mut self, dst: Reg, bias: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt7(
+            dst,
+            bias,
+            src.into(),
+            TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3A,
+        )
+    }
+
+    /// `vcvthf62hf8 xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvthf62hf8(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &dst,
+            None,
+            &RegMem::Reg(src),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x37,
+            None,
+        )
+    }
+
+    /// `vcvthf82bf4s xmm/ymm/m, xmm/ymm/zmm`
+    pub fn vcvthf82bf4s(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.op_vmov(
+            dst.into(),
+            src,
+            TypeFlags::T_N8
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3D,
+            true,
+        )
+    }
+
+    /// `vcvthf82hf6s xmm/ymm/zmm, xmm/ymm/zmm`
+    pub fn vcvthf82hf6s(&mut self, dst: Reg, src: Reg) -> Result<()> {
+        if !dst.is_simd() || !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(
+            &src,
+            None,
+            &RegMem::Reg(dst),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x3C,
+            None,
+        )
+    }
+
+    /// `vcvthf82ps xmm/ymm/zmm, xmm/m`
+    pub fn vcvthf82ps(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_vmov(
+            src.into(),
+            dst,
+            TypeFlags::T_N4
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX,
+            0x36,
+            false,
+        )
+    }
+
+    pub fn vcvtps2bf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x39,
+        )
+    }
+
+    pub fn vcvtps2bf8s(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3B,
+        )
+    }
+
+    pub fn vcvtps2hf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x38,
+        )
+    }
+
+    pub fn vcvtps2hf8s(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_F3
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3A,
+        )
+    }
+
+    pub fn vcvtrops2hf8(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x38,
+        )
+    }
+
+    pub fn vcvtrops2hf8s(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
+        self.op_cvt5(
+            dst,
+            src.into(),
+            TypeFlags::T_66
+                | TypeFlags::T_MAP5
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_B32,
+            0x3A,
+        )
+    }
+
+    fn vpmov_narrow_evex(
+        &mut self,
+        dst: impl Into<RegMem>,
+        src: Reg,
+        width: TypeFlags,
+        opcode: u8,
+        mode: bool,
+    ) -> Result<()> {
+        self.op_vmov(
+            dst.into(),
+            src,
+            width
+                | TypeFlags::T_N_VL
+                | TypeFlags::T_F3
+                | TypeFlags::T_0F38
+                | TypeFlags::T_W0
+                | TypeFlags::T_YMM
+                | TypeFlags::T_MUST_EVEX
+                | TypeFlags::T_M_K,
+            opcode,
+            mode,
+        )
+    }
+
+    /// `vpmovdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x31, false)
+    }
+
+    /// `vpmovqb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovqb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N2, 0x32, false)
+    }
+
+    /// `vpmovqw xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovqw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x34, false)
+    }
+
+    /// `vpmovsdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovsdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x21, false)
+    }
+
+    /// `vpmovsdw xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovsdw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x23, true)
+    }
+
+    /// `vpmovsqb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovsqb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N2, 0x22, false)
+    }
+
+    /// `vpmovsqd xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovsqd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x25, true)
+    }
+
+    /// `vpmovsqw xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovsqw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x24, false)
+    }
+
+    /// `vpmovswb xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovswb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x20, true)
+    }
+
+    /// `vpmovusdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovusdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x11, false)
+    }
+
+    /// `vpmovusdw xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovusdw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x13, true)
+    }
+
+    /// `vpmovusqb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovusqb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N2, 0x12, false)
+    }
+
+    /// `vpmovusqd xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovusqd(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x15, true)
+    }
+
+    /// `vpmovusqw xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovusqw(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x14, false)
+    }
+
+    /// `vpmovuswb xmm/ymm/m, xmm/ymm/zmm`.
+    pub fn vpmovuswb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N8, 0x10, true)
+    }
+
+    /// `vpmovssdb xmm/m, xmm/ymm/zmm`.
+    pub fn vpmovssdb(&mut self, dst: impl Into<RegMem>, src: Reg) -> Result<()> {
+        self.vpmov_narrow_evex(dst, src, TypeFlags::T_N4, 0x41, false)
+    }
+
+    /// `vunpackb xmm/ymm/zmm, xmm/ymm/zmm/m, imm8`
+    pub fn vunpackb(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
+        let zero = if dst.is_zmm() {
+            Reg::zmm(0)
+        } else if dst.is_ymm() {
+            Reg::ymm(0)
+        } else {
+            Reg::xmm(0)
+        };
+        self.op_avx_x_x_xm(
+            dst,
+            zero,
+            src,
+            TypeFlags::T_0F3A | TypeFlags::T_W0 | TypeFlags::T_YMM | TypeFlags::T_MUST_EVEX,
+            0x3D,
+            Some(imm),
+        )
+    }
+
+    // Xbyak opCvt3: scalar signed/unsigned integer to scalar float.
+    #[allow(clippy::too_many_arguments)] // Mirrors Xbyak's opCvt3 helper boundary.
+    fn op_cvt3(
+        &mut self,
+        dst: Reg,
+        merge: Reg,
+        src: RegMem,
+        type_: TypeFlags,
+        type64: TypeFlags,
+        type32: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        let valid_src = match src {
+            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.get_bit(), 32 | 64),
+            RegMem::Mem(_) => true,
+        };
+        if !dst.is_xmm() || !merge.is_xmm() || !valid_src {
+            return Err(Error::BadSizeOfRegister);
+        }
+        let width_type = if src.get_bit() == 64 { type64 } else { type32 };
+        self.buf
+            .op_vex(&dst, Some(&merge), &src, type_ | width_type, opcode, None)
+    }
+
+    // Xbyak opCvt1: (x, x/m), (y, x/m256), (z, y/m).
+    fn op_cvt1(&mut self, dst: Reg, src: RegMem, type_: TypeFlags, opcode: u8) -> Result<()> {
+        let valid = match src {
+            RegMem::Mem(_) => true,
+            RegMem::Reg(src) => {
+                ((dst.is_xmm() || dst.is_ymm()) && src.is_xmm()) || (dst.is_zmm() && src.is_ymm())
+            }
+        };
+        if !valid {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(&dst, None, &src, type_, opcode, None)
+    }
+
+    // Xbyak opCvt5: (x, x/y/z/xword/yword/zword).
+    fn op_cvt5(&mut self, dst: Reg, src: RegMem, type_: TypeFlags, opcode: u8) -> Result<()> {
+        let src_bit = src.get_bit();
+        if !dst.is_xmm() || !matches!(src_bit, 128 | 256 | 512) {
+            return Err(Error::BadCombination);
+        }
+        let kind = match src_bit {
+            128 => crate::operand::Kind::Xmm,
+            256 => crate::operand::Kind::Ymm,
+            _ => crate::operand::Kind::Zmm,
+        };
+        let encoded_dst = dst.copy_and_set_kind(kind);
+        let xmm0 = Reg::xmm(0);
+        self.buf
+            .op_vex(&encoded_dst, Some(&xmm0), &src, type_, opcode, None)
+    }
+
+    // Xbyak opCvt7: destination remains XMM regardless of source VL.
+    fn op_cvt7(
+        &mut self,
+        dst: Reg,
+        bias: Reg,
+        src: RegMem,
+        type_: TypeFlags,
+        opcode: u8,
+    ) -> Result<()> {
+        if !dst.is_xmm() || !bias.is_simd() || (!src.is_mem() && src.get_bit() != bias.get_bit()) {
+            return Err(Error::BadCombination);
+        }
+        self.buf
+            .op_vex(&dst, Some(&bias), &src, type_, opcode, None)
+    }
+
+    // Xbyak opVmov for vector-width narrowing conversions.
+    fn op_vmov(
+        &mut self,
+        operand: RegMem,
+        src: Reg,
+        type_: TypeFlags,
+        opcode: u8,
+        mode: bool,
+    ) -> Result<()> {
+        if !src.is_simd() {
+            return Err(Error::BadCombination);
+        }
+        let valid = match operand {
+            RegMem::Mem(_) => true,
+            RegMem::Reg(dst) if mode => {
+                (dst.is_xmm() && (src.is_xmm() || src.is_ymm())) || (dst.is_ymm() && src.is_zmm())
+            }
+            RegMem::Reg(dst) => dst.is_xmm(),
+        };
+        if !valid {
+            return Err(Error::BadCombination);
+        }
+        self.buf.op_vex(&src, None, &operand, type_, opcode, None)
     }
 }

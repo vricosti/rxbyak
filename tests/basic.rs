@@ -14,6 +14,83 @@ fn test_nop() {
 }
 
 #[test]
+fn test_xbyak_multi_byte_nops() {
+    const EXPECTED: [&[u8]; 15] = [
+        &[0x90],
+        &[0x66, 0x90],
+        &[0x0F, 0x1F, 0x00],
+        &[0x0F, 0x1F, 0x40, 0x00],
+        &[0x0F, 0x1F, 0x44, 0x00, 0x00],
+        &[0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00],
+        &[0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00],
+        &[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+        &[0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+        &[0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+        &[
+            0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        &[
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+        ],
+    ];
+
+    for (size, expected) in (1..=15).zip(EXPECTED) {
+        assert_eq!(assemble(|a| a.nop_bytes(size, 2)), expected);
+    }
+    assert_eq!(
+        assemble(|a| a.nop_bytes(10, 1)),
+        [EXPECTED[8], EXPECTED[0]].concat()
+    );
+    assert_eq!(assemble(|a| a.nop_bytes(4, 0)), [0x90; 4]);
+}
+
+#[test]
+fn test_align_uses_xbyak_multi_byte_nop() {
+    let code = assemble(|a| {
+        a.db(0xCC)?;
+        a.align(16)
+    });
+    assert_eq!(code[0], 0xCC);
+    assert_eq!(&code[1..], assemble(|a| a.nop_bytes(15, 2)));
+}
+
+#[test]
+fn test_align_rejects_non_power_of_two_like_xbyak() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(asm.align(0), Err(Error::BadAlign));
+    assert_eq!(asm.align(3), Err(Error::BadAlign));
+}
+
+#[test]
+fn test_reset_restores_writable_buffer_and_label_state() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    let first = asm.create_label();
+    asm.bind(&first).unwrap();
+    asm.mov(EAX, 1).unwrap();
+    asm.ret().unwrap();
+    asm.ready().unwrap();
+
+    asm.reset().unwrap();
+    assert_eq!(asm.size(), 0);
+
+    let second = asm.create_label();
+    asm.bind(&second).unwrap();
+    asm.mov(EAX, 2).unwrap();
+    asm.ret().unwrap();
+    assert_eq!(asm.code(), [0xB8, 2, 0, 0, 0, 0xC3]);
+}
+
+#[test]
 fn test_ret() {
     let code = assemble(|a| a.ret());
     assert_eq!(code, [0xC3]);
@@ -32,6 +109,93 @@ fn test_int3() {
 }
 
 #[test]
+fn test_xbyak_segment_prefixes() {
+    let code = assemble(|a| {
+        a.put_seg(ES)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(CS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(SS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(DS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(FS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))?;
+        a.put_seg(GS)?;
+        a.mov(EAX, dword_ptr(EAX.into()))
+    });
+    assert_eq!(
+        code,
+        [
+            0x26, 0x67, 0x8B, 0x00, 0x2E, 0x67, 0x8B, 0x00, 0x36, 0x67, 0x8B, 0x00, 0x3E, 0x67,
+            0x8B, 0x00, 0x64, 0x67, 0x8B, 0x00, 0x65, 0x67, 0x8B, 0x00,
+        ]
+    );
+}
+
+#[test]
+fn test_vpextrw_matches_xbyak_7_40_register_egpr_and_memory_forms() {
+    let code = assemble(|a| {
+        a.vpextrw(EAX, XMM1, 0x12)?;
+        a.vpextrw(R16D, XMM2, 0x34)?;
+        a.vpextrw(word_ptr(RAX + 16), XMM3, 0x56)
+    });
+    assert_eq!(
+        code,
+        [
+            0xC5, 0xF9, 0xC5, 0xC1, 0x12, 0x62, 0xFB, 0x7D, 0x08, 0x15, 0xD0, 0x34, 0xC4, 0xE3,
+            0x79, 0x15, 0x58, 0x10, 0x56,
+        ]
+    );
+}
+
+#[test]
+fn test_xbyak_7_39_1_egpr_move_and_conversion_fixes() {
+    let code = assemble(|a| {
+        a.vmovq(XMM1, qword_ptr(RAX + 8))?;
+        a.vmovq(qword_ptr(RAX + 16), XMM2)?;
+        a.vmovq(XMM3, XMM4)?;
+        a.vmovq(XMM5, R16)?;
+        a.vmovq(R17, XMM6)?;
+        a.vcvtsi2sd(XMM1, XMM2, R16)?;
+        a.vcvtsi2ss(XMM3, XMM4, R17D)?;
+        a.vcvtusi2sd(XMM5, XMM6, R18)?;
+        a.vcvtusi2ss(XMM7, XMM8, R19D)
+    });
+    assert_eq!(
+        code,
+        [
+            0xC5, 0xFA, 0x7E, 0x48, 0x08, 0xC5, 0xF9, 0xD6, 0x50, 0x10, 0xC5, 0xFA, 0x7E, 0xDC,
+            0x62, 0xF9, 0xFD, 0x08, 0x6E, 0xE8, 0x62, 0xF9, 0xFD, 0x08, 0x7E, 0xF1, 0x62, 0xF9,
+            0xEF, 0x08, 0x2A, 0xC8, 0x62, 0xF9, 0x5E, 0x08, 0x2A, 0xD9, 0x62, 0xF9, 0xCF, 0x08,
+            0x7B, 0xEA, 0x62, 0xF9, 0x3E, 0x08, 0x7B, 0xFB,
+        ]
+    );
+}
+
+#[test]
+fn test_xbyak_7_37_2_user_wait_instructions_support_egprs() {
+    let code = assemble(|a| {
+        a.tpause(EAX)?;
+        a.tpause(R16D)?;
+        a.umwait(ECX)?;
+        a.umwait(R17D)?;
+        a.umonitor(AX)?;
+        a.umonitor(EAX)?;
+        a.umonitor(RAX)?;
+        a.umonitor(R18)
+    });
+    assert_eq!(
+        code,
+        [
+            0x66, 0x0F, 0xAE, 0xF0, 0x66, 0xD5, 0x90, 0xAE, 0xF0, 0xF2, 0x0F, 0xAE, 0xF1, 0xF2,
+            0xD5, 0x90, 0xAE, 0xF1, 0xF3, 0x0F, 0xAE, 0xF0, 0x67, 0xF3, 0x0F, 0xAE, 0xF0, 0xF3,
+            0x0F, 0xAE, 0xF0, 0xF3, 0xD5, 0x90, 0xAE, 0xF2,
+        ]
+    );
+}
+
+#[test]
 fn test_push_pop_rax() {
     let code = assemble(|a| {
         a.push(RAX)?;
@@ -47,6 +211,66 @@ fn test_push_pop_r8() {
         a.pop(R8)
     });
     assert_eq!(code, [0x41, 0x50, 0x41, 0x58]);
+}
+
+#[test]
+fn test_pushp_popp_rex2_ppx_hint() {
+    let code = assemble(|a| {
+        a.pushp(RAX)?;
+        a.popp(R8)?;
+        a.pushp(R16)?;
+        a.popp(R31)
+    });
+    assert_eq!(
+        code,
+        [0xD5, 0x08, 0x50, 0xD5, 0x09, 0x58, 0xD5, 0x18, 0x50, 0xD5, 0x19, 0x5F,]
+    );
+}
+
+#[test]
+fn test_xbyak_7_38_paired_push_pop_instructions() {
+    let code = assemble(|a| {
+        a.push2(RBX, R12)?;
+        a.pop2(R12, RBX)?;
+        a.push2p(R30, R31)?;
+        a.pop2p(R31, R30)
+    });
+    assert_eq!(
+        code,
+        [
+            0x62, 0xD4, 0x64, 0x18, 0xFF, 0xF4, 0x62, 0xF4, 0x1C, 0x18, 0x8F, 0xC3, 0x62, 0xDC,
+            0x8C, 0x10, 0xFF, 0xF7, 0x62, 0xDC, 0x84, 0x10, 0x8F, 0xC6,
+        ]
+    );
+}
+
+#[test]
+fn test_pushp_rejects_non_64_bit_gpr() {
+    let mut asm = CodeAssembler::new(4096).unwrap();
+    assert_eq!(asm.pushp(EAX), Err(Error::BadCombination));
+    assert_eq!(asm.popp(XMM0), Err(Error::BadCombination));
+}
+
+#[test]
+fn test_xbyak_prefetch_family() {
+    let code = assemble(|a| {
+        let addr = byte_ptr(RAX.into());
+        a.prefetchnta(addr)?;
+        a.prefetcht0(addr)?;
+        a.prefetcht1(addr)?;
+        a.prefetcht2(addr)?;
+        a.prefetchrst2(addr)?;
+        a.prefetchit1(addr)?;
+        a.prefetchit0(addr)?;
+        a.prefetchw(addr)
+    });
+    assert_eq!(
+        code,
+        [
+            0x0F, 0x18, 0x00, 0x0F, 0x18, 0x08, 0x0F, 0x18, 0x10, 0x0F, 0x18, 0x18, 0x0F, 0x18,
+            0x20, 0x0F, 0x18, 0x30, 0x0F, 0x18, 0x38, 0x0F, 0x0D, 0x08,
+        ]
+    );
 }
 
 #[test]
