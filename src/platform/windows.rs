@@ -6,8 +6,7 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
         windows_sys::Win32::System::Memory::VirtualAlloc(
             core::ptr::null(),
             size,
-            windows_sys::Win32::System::Memory::MEM_COMMIT
-                | windows_sys::Win32::System::Memory::MEM_RESERVE,
+            windows_sys::Win32::System::Memory::MEM_RESERVE,
             windows_sys::Win32::System::Memory::PAGE_READWRITE,
         )
     };
@@ -15,6 +14,24 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
         return Err(Error::CantAlloc);
     }
     Ok(ptr as *mut u8)
+}
+
+pub unsafe fn commit_exec_mem(ptr: *mut u8, size: usize, mode: ProtectMode) -> Result<()> {
+    let protection = match mode {
+        ProtectMode::ReadWrite => windows_sys::Win32::System::Memory::PAGE_READWRITE,
+        ProtectMode::ReadWriteExec => windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
+        ProtectMode::ReadExec => windows_sys::Win32::System::Memory::PAGE_EXECUTE_READ,
+    };
+    let committed = windows_sys::Win32::System::Memory::VirtualAlloc(
+        ptr.cast(),
+        size,
+        windows_sys::Win32::System::Memory::MEM_COMMIT,
+        protection,
+    );
+    if committed.is_null() {
+        return Err(Error::CantAlloc);
+    }
+    Ok(())
 }
 
 pub unsafe fn free_exec_mem(ptr: *mut u8, _size: usize) -> Result<()> {

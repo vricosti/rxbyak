@@ -31,6 +31,12 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     Ok(ptr as *mut u8)
 }
 
+pub unsafe fn commit_exec_mem(_ptr: *mut u8, _size: usize, _mode: ProtectMode) -> Result<()> {
+    // mmap commits physical pages lazily; the complete virtual range is
+    // already available to the process.
+    Ok(())
+}
+
 pub unsafe fn free_exec_mem(ptr: *mut u8, size: usize) -> Result<()> {
     let ret = libc::munmap(ptr as *mut libc::c_void, size);
     if ret != 0 {

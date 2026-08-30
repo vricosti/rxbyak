@@ -3,6 +3,11 @@ use crate::platform::{self, ProtectMode};
 
 const DEFAULT_MAX_SIZE: usize = 4096;
 
+/// Matches Dynarmic's Windows `PRELUDE_COMMIT_SIZE`: reserve the complete
+/// fixed-address code cache, then grow its committed portion in 16 MiB chunks.
+#[cfg(windows)]
+const COMMIT_CHUNK_SIZE: usize = 16 * 1024 * 1024;
+
 /// Buffer allocation mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AllocMode {
@@ -60,6 +65,7 @@ pub struct CodeBuffer {
     ptr: *mut u8,
     size: usize,
     capacity: usize,
+    committed: usize,
     mode: AllocMode,
     protection: Option<ProtectMode>,
     addr_info_list: Vec<AddrInfo>,
@@ -83,10 +89,21 @@ impl CodeBuffer {
             }
             AllocMode::Alloc | AllocMode::AutoGrow => platform::alloc_exec_mem(cap)?,
         };
+        #[cfg(windows)]
+        let committed = cap.min(COMMIT_CHUNK_SIZE);
+        #[cfg(not(windows))]
+        let committed = cap;
+        if let Err(error) =
+            unsafe { platform::commit_exec_mem(ptr, committed, ProtectMode::ReadWrite) }
+        {
+            let _ = unsafe { platform::free_exec_mem(ptr, cap) };
+            return Err(error);
+        }
         Ok(Self {
             ptr,
             size: 0,
             capacity: cap,
+            committed,
             mode,
             protection: Some(ProtectMode::ReadWrite),
             addr_info_list: Vec::new(),
@@ -103,6 +120,7 @@ impl CodeBuffer {
             ptr: buf,
             size: 0,
             capacity: size,
+            committed: size,
             mode: AllocMode::UserBuf,
             protection: None,
             addr_info_list: Vec::new(),
@@ -123,6 +141,12 @@ impl CodeBuffer {
     /// Get buffer capacity.
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Bytes currently backed by committed pages. On Unix this equals the
+    /// virtual capacity; on Windows it grows as code is emitted.
+    pub fn committed_size(&self) -> usize {
+        self.committed
     }
 
     /// Get pointer to start of code buffer.
@@ -163,6 +187,7 @@ impl CodeBuffer {
         if self.size >= self.capacity {
             self.grow()?;
         }
+        self.ensure_committed(self.size + 1)?;
         unsafe {
             *self.ptr.add(self.size) = byte;
         }
@@ -215,6 +240,7 @@ impl CodeBuffer {
         if !matches!(size, 1 | 2 | 4 | 8) {
             return Err(Error::BadParameter);
         }
+        self.ensure_committed(offset + size)?;
         let bytes = val.to_le_bytes();
         for (i, byte) in bytes.iter().copied().enumerate().take(size) {
             unsafe {
@@ -258,7 +284,7 @@ impl CodeBuffer {
         if self.mode == AllocMode::UserBuf {
             return Ok(());
         }
-        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadExec)? };
+        unsafe { platform::protect(self.ptr, self.committed, ProtectMode::ReadExec)? };
         self.protection = Some(ProtectMode::ReadExec);
         Ok(())
     }
@@ -268,7 +294,7 @@ impl CodeBuffer {
         if self.mode == AllocMode::UserBuf {
             return Ok(());
         }
-        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWrite)? };
+        unsafe { platform::protect(self.ptr, self.committed, ProtectMode::ReadWrite)? };
         self.protection = Some(ProtectMode::ReadWrite);
         Ok(())
     }
@@ -278,7 +304,7 @@ impl CodeBuffer {
         if self.mode == AllocMode::UserBuf {
             return Ok(());
         }
-        unsafe { platform::protect(self.ptr, self.capacity, ProtectMode::ReadWriteExec)? };
+        unsafe { platform::protect(self.ptr, self.committed, ProtectMode::ReadWriteExec)? };
         self.protection = Some(ProtectMode::ReadWriteExec);
         Ok(())
     }
@@ -299,6 +325,17 @@ impl CodeBuffer {
         let new_cap = self.capacity * 2;
         let new_ptr = platform::alloc_exec_mem(new_cap)?;
 
+        #[cfg(windows)]
+        let new_committed = new_cap.min(self.committed.max(COMMIT_CHUNK_SIZE));
+        #[cfg(not(windows))]
+        let new_committed = new_cap;
+        if let Err(error) =
+            unsafe { platform::commit_exec_mem(new_ptr, new_committed, ProtectMode::ReadWrite) }
+        {
+            let _ = unsafe { platform::free_exec_mem(new_ptr, new_cap) };
+            return Err(error);
+        }
+
         // Copy existing code
         unsafe {
             core::ptr::copy_nonoverlapping(self.ptr, new_ptr, self.size);
@@ -310,7 +347,35 @@ impl CodeBuffer {
 
         self.ptr = new_ptr;
         self.capacity = new_cap;
+        self.committed = new_committed;
         self.protection = Some(ProtectMode::ReadWrite);
+        Ok(())
+    }
+
+    fn ensure_committed(&mut self, required: usize) -> Result<()> {
+        if required <= self.committed {
+            return Ok(());
+        }
+        if required > self.capacity {
+            return Err(Error::CodeIsTooBig);
+        }
+
+        #[cfg(windows)]
+        let new_committed = self.capacity.min(
+            required.saturating_add(COMMIT_CHUNK_SIZE - 1) / COMMIT_CHUNK_SIZE * COMMIT_CHUNK_SIZE,
+        );
+        #[cfg(not(windows))]
+        let new_committed = self.capacity;
+
+        let mode = self.protection.unwrap_or(ProtectMode::ReadWrite);
+        unsafe {
+            platform::commit_exec_mem(
+                self.ptr.add(self.committed),
+                new_committed - self.committed,
+                mode,
+            )?;
+        }
+        self.committed = new_committed;
         Ok(())
     }
 
@@ -349,6 +414,40 @@ mod tests {
         buf.db(0xC3).unwrap(); // ret
         assert_eq!(buf.size(), 2);
         assert_eq!(buf.as_slice(), &[0x90, 0xC3]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_large_buffers_commit_progressively() {
+        use windows_sys::Win32::System::Memory::{
+            VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_RESERVE,
+        };
+
+        unsafe fn state_at(ptr: *const u8) -> u32 {
+            let mut info: MEMORY_BASIC_INFORMATION = core::mem::zeroed();
+            let queried = VirtualQuery(
+                ptr.cast(),
+                &mut info,
+                core::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            );
+            assert_ne!(queried, 0);
+            info.State
+        }
+
+        let mut buf = CodeBuffer::new(512 * 1024 * 1024, AllocMode::Alloc).unwrap();
+        assert_eq!(buf.committed_size(), COMMIT_CHUNK_SIZE);
+        unsafe {
+            assert_eq!(state_at(buf.ptr), MEM_COMMIT);
+            assert_eq!(state_at(buf.ptr.add(32 * 1024 * 1024)), MEM_RESERVE);
+        }
+
+        buf.set_size(20 * 1024 * 1024);
+        buf.db(0x90).unwrap();
+        assert_eq!(buf.committed_size(), 2 * COMMIT_CHUNK_SIZE);
+        unsafe {
+            assert_eq!(state_at(buf.ptr.add(20 * 1024 * 1024)), MEM_COMMIT);
+            assert_eq!(state_at(buf.ptr.add(40 * 1024 * 1024)), MEM_RESERVE);
+        }
     }
 
     #[test]

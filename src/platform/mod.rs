@@ -35,6 +35,32 @@ pub fn alloc_exec_mem(size: usize) -> Result<*mut u8> {
     }
 }
 
+/// Commit a previously reserved portion of executable memory.
+///
+/// Windows reserves large fixed-address JIT buffers up front and commits them
+/// progressively. Unix mappings already provide lazy physical commitment, so
+/// this is a no-op there.
+///
+/// # Safety
+///
+/// `ptr..ptr + size` must be an uncommitted subrange of a live allocation
+/// returned by [`alloc_exec_mem`].
+pub unsafe fn commit_exec_mem(ptr: *mut u8, size: usize, mode: ProtectMode) -> Result<()> {
+    #[cfg(unix)]
+    {
+        unix::commit_exec_mem(ptr, size, mode)
+    }
+    #[cfg(windows)]
+    {
+        windows::commit_exec_mem(ptr, size, mode)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (ptr, size, mode);
+        Err(crate::error::Error::CantAlloc)
+    }
+}
+
 /// Free executable memory.
 ///
 /// # Safety
