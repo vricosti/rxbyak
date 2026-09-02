@@ -115,6 +115,7 @@ fn main() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn num_cpus() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())

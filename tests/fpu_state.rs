@@ -68,10 +68,7 @@ fn x87_environment_encodings_match_xbyak_7_40() {
 #[test]
 fn fxrstor_encodings_match_xbyak_7_40() {
     let address = ptr(R13 + R14 * 8 + 0x20);
-    assert_eq!(
-        assemble(|a| a.fxrstor(address.clone())),
-        decode_hex("430fae4cf520")
-    );
+    assert_eq!(assemble(|a| a.fxrstor(address)), decode_hex("430fae4cf520"));
     assert_eq!(
         assemble(|a| a.fxrstor64(address)),
         decode_hex("4b0fae4cf520")

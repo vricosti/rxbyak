@@ -1,3 +1,5 @@
+#![allow(clippy::vec_init_then_push)]
+
 /// AVX-512/EVEX instruction NASM conformance tests.
 mod common;
 
@@ -27,7 +29,7 @@ fn test_nm_evex_arith() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vaddps", |a, d, s1, s2| a.vaddps(d, s1, s2)),
         ("vaddpd", |a, d, s1, s2| a.vaddpd(d, s1, s2)),
         ("vsubps", |a, d, s1, s2| a.vsubps(d, s1, s2)),
@@ -361,7 +363,7 @@ fn test_nm_opmask_logic() {
     let mut insns: Vec<NmPair> = Vec::new();
 
     // kandw k, k, k
-    let ops3: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops3: &[RegTernaryOp] = &[
         ("kandw", |a, d, s1, s2| a.kandw(d, s1, s2)),
         ("kandb", |a, d, s1, s2| a.kandb(d, s1, s2)),
         ("kandd", |a, d, s1, s2| a.kandd(d, s1, s2)),
@@ -388,7 +390,7 @@ fn test_nm_opmask_logic() {
     }
 
     // 2-operand: knotw, kortestw
-    let ops2: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops2: &[RegBinaryOp] = &[
         ("knotw", |a, d, s| a.knotw(d, s)),
         ("knotb", |a, d, s| a.knotb(d, s)),
         ("knotd", |a, d, s| a.knotd(d, s)),

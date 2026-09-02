@@ -160,8 +160,8 @@ impl Jit {
         self.asm.ready()
     }
 
-    fn get_func(&self) -> fn(f64) -> f64 {
-        unsafe { self.asm.get_code() }
+    fn assemble_function(&self) -> fn(f64) -> f64 {
+        unsafe { self.asm.as_fn() }
     }
 }
 
@@ -365,7 +365,7 @@ fn main() -> Result<()> {
         parser.parse_expr_jit(&mut jit)?;
     }
     jit.complete()?;
-    let jit_func = jit.get_func();
+    let jit_func = jit.assemble_function();
     println!("JIT eval(2.3) = {:.6}", jit_func(2.3));
 
     // Benchmark

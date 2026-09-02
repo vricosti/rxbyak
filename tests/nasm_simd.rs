@@ -21,9 +21,9 @@ macro_rules! skip_if_no_nasm {
 #[test]
 fn test_nasm_sse_float_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("addps", |a, d, s| a.addps(d, s)),
         ("addpd", |a, d, s| a.addpd(d, s)),
         ("addss", |a, d, s| a.addss(d, s)),
@@ -72,9 +72,9 @@ fn test_nasm_sse_float_ops() {
 #[test]
 fn test_nasm_sse_logic_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("andps", |a, d, s| a.andps(d, s)),
         ("andpd", |a, d, s| a.andpd(d, s)),
         ("orps", |a, d, s| a.orps(d, s)),
@@ -109,10 +109,10 @@ fn test_nasm_sse_logic_ops() {
 #[test]
 fn test_nasm_sse_mov_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // movaps, movups, movapd, movupd, movdqa, movdqu (reg, reg)
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("movaps", |a, d, s| a.movaps(d, s)),
         ("movups", |a, d, s| a.movups(d, s)),
         ("movapd", |a, d, s| a.movapd(d, s)),
@@ -146,9 +146,9 @@ fn test_nasm_sse_mov_ops() {
 #[test]
 fn test_nasm_sse_int_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("paddd", |a, d, s| a.paddd(d, s)),
         ("psubd", |a, d, s| a.psubd(d, s)),
         ("pxor", |a, d, s| a.pxor(d, s)),
@@ -181,9 +181,9 @@ fn test_nasm_sse_int_ops() {
 #[test]
 fn test_nasm_sse_compare() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("comiss", |a, d, s| a.comiss(d, s)),
         ("comisd", |a, d, s| a.comisd(d, s)),
         ("ucomiss", |a, d, s| a.ucomiss(d, s)),
@@ -214,9 +214,9 @@ fn test_nasm_sse_compare() {
 #[test]
 fn test_nasm_sse_convert() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("cvtss2sd", |a, d, s| a.cvtss2sd(d, s)),
         ("cvtsd2ss", |a, d, s| a.cvtsd2ss(d, s)),
     ];
@@ -241,7 +241,7 @@ fn test_nasm_sse_convert() {
 #[test]
 fn test_nasm_sse_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // addps xmm, [mem]
     for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
@@ -282,7 +282,7 @@ fn test_nasm_sse_mem() {
 #[test]
 fn test_nasm_movd_movq() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // movd xmm, gpr32
     for &(xmm, xmm_name) in &[(XMM0, "xmm0"), (XMM8, "xmm8")] {
@@ -325,9 +325,9 @@ fn test_nasm_movd_movq() {
 #[test]
 fn test_nasm_avx_float_ops_xmm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vaddps", |a, d, s1, s2| a.vaddps(d, s1, s2)),
         ("vaddpd", |a, d, s1, s2| a.vaddpd(d, s1, s2)),
         ("vaddss", |a, d, s1, s2| a.vaddss(d, s1, s2)),
@@ -372,9 +372,9 @@ fn test_nasm_avx_float_ops_xmm() {
 #[test]
 fn test_nasm_avx_float_ops_ymm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vaddps", |a, d, s1, s2| a.vaddps(d, s1, s2)),
         ("vaddpd", |a, d, s1, s2| a.vaddpd(d, s1, s2)),
         ("vsubps", |a, d, s1, s2| a.vsubps(d, s1, s2)),
@@ -409,9 +409,9 @@ fn test_nasm_avx_float_ops_ymm() {
 #[test]
 fn test_nasm_avx_mov_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("vmovaps", |a, d, s| a.vmovaps(d, s)),
         ("vmovups", |a, d, s| a.vmovups(d, s)),
         ("vmovapd", |a, d, s| a.vmovapd(d, s)),
@@ -454,9 +454,9 @@ fn test_nasm_avx_mov_ops() {
 #[test]
 fn test_nasm_avx_int_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vpaddd", |a, d, s1, s2| a.vpaddd(d, s1, s2)),
         ("vpsubd", |a, d, s1, s2| a.vpsubd(d, s1, s2)),
         ("vpxor", |a, d, s1, s2| a.vpxor(d, s1, s2)),
@@ -489,7 +489,7 @@ fn test_nasm_avx_int_ops() {
 #[test]
 fn test_nasm_avx_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // vaddps xmm, xmm, [mem]
     for &(base, base_name) in &[(RAX, "rax"), (RBX, "rbx"), (R8, "r8")] {
@@ -535,9 +535,9 @@ fn test_nasm_avx_mem() {
 #[test]
 fn test_nasm_fma_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vfmadd132ps", |a, d, s1, s2| a.vfmadd132ps(d, s1, s2)),
         ("vfmadd213ps", |a, d, s1, s2| a.vfmadd213ps(d, s1, s2)),
         ("vfmadd231ps", |a, d, s1, s2| a.vfmadd231ps(d, s1, s2)),
@@ -566,7 +566,7 @@ fn test_nasm_fma_ops() {
     }
 
     // YMM variants
-    let ymm_ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ymm_ops: &[RegTernaryOp] = &[
         ("vfmadd132ps", |a, d, s1, s2| a.vfmadd132ps(d, s1, s2)),
         ("vfmadd213ps", |a, d, s1, s2| a.vfmadd213ps(d, s1, s2)),
         ("vfmadd231ps", |a, d, s1, s2| a.vfmadd231ps(d, s1, s2)),
@@ -588,7 +588,7 @@ fn test_nasm_fma_ops() {
 #[test]
 fn test_nasm_sse_all_xmm_pairs() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // addps with all xmm0-xmm15 pairs (subset: each with xmm0 and xmm8)
     for &(dst, dst_name) in XMMS.iter().chain(XMMS_EXT.iter()) {
@@ -614,9 +614,9 @@ fn test_nasm_sse_all_xmm_pairs() {
 #[test]
 fn test_nasm_generated_sse_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("minps", |a, d, s| a.minps(d, s)),
         ("maxps", |a, d, s| a.maxps(d, s)),
         ("minpd", |a, d, s| a.minpd(d, s)),
@@ -659,9 +659,9 @@ fn test_nasm_generated_sse_ops() {
 #[test]
 fn test_nasm_sse3_ssse3_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("addsubps", |a, d, s| a.addsubps(d, s)),
         ("addsubpd", |a, d, s| a.addsubpd(d, s)),
         ("haddps", |a, d, s| a.haddps(d, s)),
@@ -704,9 +704,9 @@ fn test_nasm_sse3_ssse3_ops() {
 #[test]
 fn test_nasm_sse4_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("ptest", |a, d, s| a.ptest(d, s)),
         ("pmovzxbw", |a, d, s| a.pmovzxbw(d, s)),
         ("pmovsxbw", |a, d, s| a.pmovsxbw(d, s)),
@@ -732,9 +732,9 @@ fn test_nasm_sse4_ops() {
 #[test]
 fn test_nasm_aes_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("aesenc", |a, d, s| a.aesenc(d, s)),
         ("aesenclast", |a, d, s| a.aesenclast(d, s)),
         ("aesdec", |a, d, s| a.aesdec(d, s)),
@@ -761,7 +761,7 @@ fn test_nasm_aes_ops() {
 #[test]
 fn test_nasm_sse_imm8_ops() {
     let nasm = skip_if_no_nasm!();
-    let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
+    let insns: InstructionBatch = vec![
         (
             "cmpps xmm0, xmm1, 0".into(),
             Box::new(|a: &mut CodeAssembler| a.cmpps(XMM0, XMM1, 0)),

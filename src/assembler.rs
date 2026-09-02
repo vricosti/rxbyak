@@ -223,7 +223,7 @@ impl CodeAssembler {
     /// # Safety
     /// The caller must ensure the generated code matches the expected
     /// calling convention and function signature.
-    pub unsafe fn get_code<F>(&self) -> F {
+    pub unsafe fn as_fn<F>(&self) -> F {
         self.buf.as_fn()
     }
 
@@ -346,7 +346,7 @@ impl CodeAssembler {
         let id = label.id();
         let is_auto_grow = self.buf.alloc_mode() == AllocMode::AutoGrow;
 
-        if let Some(offset) = self.label_mgr.get_offset(label) {
+        if let Some(offset) = self.label_mgr.offset(label) {
             if relative {
                 let d = offset as i64 + disp - self.buf.size() as i64 - jmp_size as i64;
                 if !(-2147483648..=2147483647).contains(&d) {
@@ -395,7 +395,7 @@ impl CodeAssembler {
     /// This is the short-only path of Xbyak `opJmp` used by LOOP/JECXZ.
     fn short_label_jump(&mut self, label: &Label, opcode: u8) -> Result<()> {
         self.buf.db(opcode)?;
-        if let Some(offset) = self.label_mgr.get_offset(label) {
+        if let Some(offset) = self.label_mgr.offset(label) {
             let displacement = offset as i64 - self.buf.size() as i64 - 1;
             if !(-128..=127).contains(&displacement) {
                 return Err(Error::LabelIsTooFar);
@@ -418,8 +418,8 @@ impl CodeAssembler {
 
     /// Xbyak `opInOut(const Reg&, const Reg&, uint8_t)`.
     fn op_in_out_reg(&mut self, accumulator: Reg, port: Reg, code: u8) -> Result<()> {
-        if accumulator.get_idx() == 0 && port.get_idx() == 2 && port.is_bit(16) {
-            return match accumulator.get_bit() {
+        if accumulator.index() == 0 && port.index() == 2 && port.is_bit(16) {
+            return match accumulator.bit_width() {
                 8 => self.buf.db(code),
                 16 => {
                     self.buf.db(0x66)?;
@@ -434,8 +434,8 @@ impl CodeAssembler {
 
     /// Xbyak `opInOut(const Reg&, uint8_t, uint8_t)`.
     fn op_in_out_imm(&mut self, accumulator: Reg, code: u8, port: u8) -> Result<()> {
-        if accumulator.get_idx() == 0 {
-            return match accumulator.get_bit() {
+        if accumulator.index() == 0 {
+            return match accumulator.bit_width() {
                 8 => {
                     self.buf.db(code)?;
                     self.buf.db(port)
@@ -477,7 +477,7 @@ impl CodeAssembler {
     }
 
     /// Get immediate bit size for arithmetic operations.
-    fn get_imm_bit(reg_bit: u16, imm: i64) -> u8 {
+    fn immediate_bit_width(reg_bit: u16, imm: i64) -> u8 {
         if reg_bit == 8 {
             return 8;
         }
@@ -595,17 +595,17 @@ impl CodeAssembler {
                 &reg,
                 &default,
             )?;
-            self.buf.db(0x50 | (reg.get_idx() & 7))
+            self.buf.db(0x50 | (reg.index() & 7))
         } else {
-            let bit = reg.get_bit();
+            let bit = reg.bit_width();
             if bit == 16 {
                 self.buf.db(0x66)?;
             }
             if bit == 16 || bit == 64 {
-                if reg.get_idx() >= 8 {
+                if reg.index() >= 8 {
                     self.buf.db(0x41)?;
                 }
-                self.buf.db(0x50 | (reg.get_idx() & 7))
+                self.buf.db(0x50 | (reg.index() & 7))
             } else {
                 Err(Error::BadCombination)
             }
@@ -636,17 +636,17 @@ impl CodeAssembler {
                 &reg,
                 &default,
             )?;
-            self.buf.db(0x58 | (reg.get_idx() & 7))
+            self.buf.db(0x58 | (reg.index() & 7))
         } else {
-            let bit = reg.get_bit();
+            let bit = reg.bit_width();
             if bit == 16 {
                 self.buf.db(0x66)?;
             }
             if bit == 16 || bit == 64 {
-                if reg.get_idx() >= 8 {
+                if reg.index() >= 8 {
                     self.buf.db(0x41)?;
                 }
-                self.buf.db(0x58 | (reg.get_idx() & 7))
+                self.buf.db(0x58 | (reg.index() & 7))
             } else {
                 Err(Error::BadCombination)
             }
@@ -725,7 +725,7 @@ impl CodeAssembler {
             &reg,
             &none,
         )?;
-        self.buf.db(opcode | (reg.get_idx() & 7))
+        self.buf.db(opcode | (reg.index() & 7))
     }
 
     /// `mov dst, src` — Move data.
@@ -736,7 +736,7 @@ impl CodeAssembler {
         match (dst, src) {
             // mov reg, reg
             (RegMem::Reg(d), RegMemImm::Reg(s)) => {
-                if d.get_bit() != s.get_bit() {
+                if d.bit_width() != s.bit_width() {
                     return Err(Error::BadSizeOfRegister);
                 }
                 let code = if d.is_bit(8) { 0x88u8 } else { 0x89u8 };
@@ -756,7 +756,7 @@ impl CodeAssembler {
             }
             // mov mem, imm
             (RegMem::Mem(m), RegMemImm::Imm(imm)) => {
-                let bit = m.get_bit();
+                let bit = m.bit_width();
                 if bit == 0 {
                     return Err(Error::MemSizeIsNotSpecified);
                 }
@@ -777,8 +777,8 @@ impl CodeAssembler {
 
     /// Internal: mov reg, imm with optimal encoding.
     fn mov_reg_imm(&mut self, reg: &Reg, imm: u64) -> Result<()> {
-        let bit = reg.get_bit();
-        let idx = reg.get_idx();
+        let bit = reg.bit_width();
+        let idx = reg.index();
 
         if bit == 64 && (imm & !0xFFFFFFFFu64) == 0 {
             // Use 32-bit mov which zero-extends
@@ -821,17 +821,17 @@ impl CodeAssembler {
 
         match (dst, src) {
             (RegMem::Reg(d), RegMemImm::Reg(s)) => {
-                if d.get_bit() != s.get_bit() {
+                if d.bit_width() != s.bit_width() {
                     return Err(Error::BadSizeOfRegister);
                 }
                 let code = base_code | if d.is_bit(8) { 0 } else { 1 };
                 self.buf.op_rr(&s, &d, TypeFlags::NONE, code)
             }
             (RegMem::Reg(d), RegMemImm::Imm(imm)) => {
-                let imm_bit = Self::get_imm_bit(d.get_bit(), imm);
+                let imm_bit = Self::immediate_bit_width(d.bit_width(), imm);
                 // Special short form for eax/ax/al
-                if d.get_idx() == 0
-                    && (d.get_bit() == imm_bit as u16 || (d.is_bit(64) && imm_bit == 32))
+                if d.index() == 0
+                    && (d.bit_width() == imm_bit as u16 || (d.is_bit(64) && imm_bit == 32))
                 {
                     let default = Reg::default();
                     self.buf
@@ -839,7 +839,7 @@ impl CodeAssembler {
                     self.buf
                         .db(base_code | 4 | if imm_bit == 8 { 0 } else { 1 })?;
                 } else {
-                    let tmp = if (imm_bit as u16) < d.get_bit().min(32) {
+                    let tmp = if (imm_bit as u16) < d.bit_width().min(32) {
                         2u8
                     } else {
                         0
@@ -863,11 +863,11 @@ impl CodeAssembler {
                 self.buf.op_mr(&m, &s, TypeFlags::NONE, code)
             }
             (RegMem::Mem(m), RegMemImm::Imm(imm)) => {
-                let bit = m.get_bit();
+                let bit = m.bit_width();
                 if bit == 0 {
                     return Err(Error::MemSizeIsNotSpecified);
                 }
-                let imm_bit = Self::get_imm_bit(bit, imm);
+                let imm_bit = Self::immediate_bit_width(bit, imm);
                 let tmp = if (imm_bit as u16) < bit.min(32) {
                     2u8
                 } else {
@@ -941,7 +941,7 @@ impl CodeAssembler {
             return Err(Error::BadCombination);
         }
         self.buf
-            .op_rext_disable_rex(&op, bnd.get_idx(), prefix | TypeFlags::T_0F, opcode)
+            .op_rext_disable_rex(&op, bnd.index(), prefix | TypeFlags::T_0F, opcode)
     }
 
     /// `bndcl bnd, r/m32/r/m64` — check lower bound.
@@ -1093,7 +1093,7 @@ impl CodeAssembler {
     }
 
     fn conditional_imm_bit(op: &RegMem, imm: i32) -> Result<u8> {
-        let op_bit = op.get_bit();
+        let op_bit = op.bit_width();
         if op_bit == 0 {
             return Err(Error::MemSizeIsNotSpecified);
         }
@@ -1122,7 +1122,7 @@ impl CodeAssembler {
 
     fn op_ccmp(&mut self, op1: RegMem, op2: RegMem, dfv: i32, opcode: u8, sc: u8) -> Result<()> {
         let dfv = Self::validate_dfv(dfv)?;
-        let bit = op1.get_bit() | op2.get_bit();
+        let bit = op1.bit_width() | op2.bit_width();
         let default_flags = Reg::new(15 - dfv, crate::operand::Kind::Reg, bit);
         self.buf.op_roo(
             &default_flags,
@@ -1139,7 +1139,7 @@ impl CodeAssembler {
     fn op_ccmpi(&mut self, op: RegMem, imm: i32, dfv: i32, sc: u8) -> Result<()> {
         let dfv = Self::validate_dfv(dfv)?;
         let imm_bit = Self::conditional_imm_bit(&op, imm)?;
-        let op_bit = op.get_bit();
+        let op_bit = op.bit_width();
         let opcode = 0x80 | (u8::from((imm_bit as u16) < op_bit.min(32)) * 2);
         self.buf.op_roo(
             &Reg::new(15 - dfv, crate::operand::Kind::Reg, op_bit),
@@ -1155,7 +1155,7 @@ impl CodeAssembler {
 
     fn op_testi(&mut self, op: RegMem, imm: i32, dfv: i32, sc: u8) -> Result<()> {
         let dfv = Self::validate_dfv(dfv)?;
-        let op_bit = op.get_bit();
+        let op_bit = op.bit_width();
         if op_bit == 0 {
             return Err(Error::MemSizeIsNotSpecified);
         }
@@ -1173,12 +1173,12 @@ impl CodeAssembler {
     }
 
     fn op_cfcmov(&mut self, dst: Reg, op1: RegMem, op2: RegMem, opcode: u8) -> Result<()> {
-        let dst_bit = dst.get_bit();
-        let op2_bit = op2.get_bit();
+        let dst_bit = dst.bit_width();
+        let op2_bit = op2.bit_width();
         if dst_bit > 0 && op2_bit > 0 && dst_bit != op2_bit {
             return Err(Error::BadSizeOfRegister);
         }
-        if op1.get_bit() == 8 || op2_bit == 8 {
+        if op1.bit_width() == 8 || op2_bit == 8 {
             return Err(Error::BadSizeOfRegister);
         }
         match op2 {
@@ -1359,12 +1359,12 @@ impl CodeAssembler {
         }
         // Emit: REX.W + 8D /r with RIP-relative ModRM (mod=0, rm=5)
         // REX.W prefix
-        let rex = 0x48 | if dst.get_idx() >= 8 { 0x04 } else { 0 };
+        let rex = 0x48 | if dst.index() >= 8 { 0x04 } else { 0 };
         self.buf.db(rex)?;
         // opcode for LEA
         self.buf.db(0x8D)?;
         // ModRM: mod=00, reg=dst, rm=101 (RIP-relative)
-        self.buf.db(((dst.get_idx() & 7) << 3) | 5)?;
+        self.buf.db(((dst.index() & 7) << 3) | 5)?;
         // 32-bit displacement (relative to end of instruction)
         self.put_label(label, 4, true, 0)
     }
@@ -1381,7 +1381,7 @@ impl CodeAssembler {
             }
             (RegMem::Reg(d), RegMemImm::Imm(imm)) => {
                 // test eax, imm → short form
-                if d.get_idx() == 0 {
+                if d.index() == 0 {
                     let default = Reg::default();
                     self.buf
                         .emit_rex_for_reg_reg(&d, &default, TypeFlags::NONE)?;
@@ -1396,14 +1396,14 @@ impl CodeAssembler {
                         if d.is_bit(8) {
                             1
                         } else {
-                            (d.get_bit().min(32) / 8) as u8
+                            (d.bit_width().min(32) / 8) as u8
                         },
                     )?;
                 }
                 let n = if d.is_bit(8) {
                     1
                 } else {
-                    (d.get_bit().min(32) / 8) as usize
+                    (d.bit_width().min(32) / 8) as usize
                 };
                 self.buf.db_n(imm as u64, n)
             }
@@ -1412,7 +1412,7 @@ impl CodeAssembler {
                 self.buf.op_mr(&m, &s, TypeFlags::NONE, code)
             }
             (RegMem::Mem(m), RegMemImm::Imm(imm)) => {
-                let bit = m.get_bit();
+                let bit = m.bit_width();
                 if bit == 0 {
                     return Err(Error::MemSizeIsNotSpecified);
                 }
@@ -1466,7 +1466,7 @@ impl CodeAssembler {
             JmpType::Short => {
                 self.buf.db(0xEB)?;
                 // Emit 1-byte placeholder
-                if let Some(offset) = self.label_mgr.get_offset(label) {
+                if let Some(offset) = self.label_mgr.offset(label) {
                     let d = offset as i64 - self.buf.size() as i64 - 1;
                     if !(-128..=127).contains(&d) {
                         return Err(Error::LabelIsTooFar);
@@ -1557,7 +1557,7 @@ impl CodeAssembler {
         match jmp_type {
             JmpType::Short => {
                 self.buf.db(0x70 | cc)?;
-                if let Some(offset) = self.label_mgr.get_offset(label) {
+                if let Some(offset) = self.label_mgr.offset(label) {
                     let d = offset as i64 - self.buf.size() as i64 - 1;
                     if !(-128..=127).contains(&d) {
                         return Err(Error::LabelIsTooFar);
@@ -1790,7 +1790,7 @@ impl CodeAssembler {
         let (p1, p2) = if op1.is_mem()
             || (op2.is_reg()
                 && !op2.as_reg().unwrap().is_bit(8)
-                && op2.as_reg().unwrap().get_idx() == 0)
+                && op2.as_reg().unwrap().index() == 0)
         {
             (op2, op1)
         } else {
@@ -1802,17 +1802,17 @@ impl CodeAssembler {
             RegMem::Mem(_) => return Err(Error::BadCombination),
         };
         // Size check
-        if r1.get_bit() != p2.get_bit() {
+        if r1.bit_width() != p2.bit_width() {
             return Err(Error::BadSizeOfRegister);
         }
         // Short form (0x90+reg): both registers, p1 idx=0, not 8-bit,
         // and NOT xchg eax,eax (which would encode as NOP 0x90 in 64-bit mode).
         if let RegMem::Reg(r2) = &p2 {
-            if r1.get_idx() == 0 && !r1.is_bit(8) && (r2.get_idx() != 0 || !r1.is_bit(32)) {
+            if r1.index() == 0 && !r1.is_bit(8) && (r2.index() != 0 || !r1.is_bit(32)) {
                 let default = Reg::default();
                 self.buf
                     .emit_rex_for_reg_reg(r2, &default, TypeFlags::NONE)?;
-                return self.buf.db(0x90 | (r2.get_idx() & 7));
+                return self.buf.db(0x90 | (r2.index() & 7));
             }
         }
         // General form: 0x86 for 8-bit, 0x87 for 16/32/64-bit
@@ -1827,11 +1827,11 @@ impl CodeAssembler {
     #[inline]
     pub fn movzx(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
         let src = src.into();
-        let src_bit = src.get_bit();
+        let src_bit = src.bit_width();
         if src_bit >= 32 {
             return Err(Error::BadCombination);
         }
-        if dst.get_bit() <= src_bit {
+        if dst.bit_width() <= src_bit {
             return Err(Error::BadCombination);
         }
         let w = if src_bit == 16 { 1u8 } else { 0 };
@@ -1855,11 +1855,11 @@ impl CodeAssembler {
     #[inline]
     pub fn movsx(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
         let src = src.into();
-        let src_bit = src.get_bit();
+        let src_bit = src.bit_width();
         if src_bit >= 32 {
             return Err(Error::BadCombination);
         }
-        if dst.get_bit() <= src_bit {
+        if dst.bit_width() <= src_bit {
             return Err(Error::BadCombination);
         }
         let w = if src_bit == 16 { 1u8 } else { 0 };
@@ -1943,12 +1943,12 @@ impl CodeAssembler {
     fn shift_op(&mut self, op: RegMem, imm: u8, ext: u8) -> Result<()> {
         let code = if imm == 1 { 0xD0u8 } else { 0xC0u8 };
         let bit = match &op {
-            RegMem::Reg(r) => r.get_bit(),
+            RegMem::Reg(r) => r.bit_width(),
             RegMem::Mem(m) => {
-                if m.get_bit() == 0 {
+                if m.bit_width() == 0 {
                     return Err(Error::MemSizeIsNotSpecified);
                 }
-                m.get_bit()
+                m.bit_width()
             }
         };
         let code = code | if bit == 8 { 0 } else { 1 };
@@ -2051,7 +2051,7 @@ impl CodeAssembler {
     ) -> Result<()> {
         let op = op.into();
         if let RegMem::Reg(r) = &op {
-            if x2.get_kind() as u16 != r.get_kind() as u16 {
+            if x2.kind() as u16 != r.kind() as u16 {
                 return Err(Error::BadCombination);
             }
         }
@@ -2077,7 +2077,7 @@ impl CodeAssembler {
             src,
             TypeFlags::T_0F3A | TypeFlags::T_66 | TypeFlags::T_YMM,
             opcode,
-            Some(mask.get_idx().wrapping_mul(16)),
+            Some(mask.index().wrapping_mul(16)),
         )
     }
 
@@ -2534,13 +2534,13 @@ impl CodeAssembler {
         opcode: u8,
         mode: u8,
     ) -> Result<()> {
-        let exp = addr.get_reg_exp();
-        let index = *exp.get_index();
-        if !matches!(index.get_bit(), 128 | 256) {
+        let exp = addr.register_expression();
+        let index = *exp.index();
+        if !matches!(index.bit_width(), 128 | 256) {
             return Err(Error::BadVsibAddressing);
         }
 
-        let index_is_ymm = index.get_bit() == 256;
+        let index_is_ymm = index.bit_width() == 256;
         if !dst.is_xmm() || index_is_ymm || !mask.is_xmm() {
             let valid = match mode {
                 0 => dst.is_ymm() && !index_is_ymm && mask.is_ymm(),
@@ -2552,20 +2552,20 @@ impl CodeAssembler {
             }
         }
 
-        if dst.get_idx() == index.get_idx()
-            || dst.get_idx() == mask.get_idx()
-            || index.get_idx() == mask.get_idx()
+        if dst.index() == index.index()
+            || dst.index() == mask.index()
+            || index.index() == mask.index()
         {
             return Err(Error::SameRegsAreInvalid);
         }
 
         let encoded_dst = if index_is_ymm {
-            Reg::ymm(dst.get_idx())
+            Reg::ymm(dst.index())
         } else {
             dst
         };
         let encoded_mask = if index_is_ymm {
-            Reg::ymm(mask.get_idx())
+            Reg::ymm(mask.index())
         } else {
             mask
         };
@@ -2600,17 +2600,17 @@ impl CodeAssembler {
         if value.has_zero() {
             return Err(Error::InvalidZero);
         }
-        let index = *addr.get_reg_exp().get_index();
+        let index = *addr.register_expression().index();
         Self::check_gather2(value, index, mode)?;
 
-        let mut mask_idx = value.get_opmask_idx();
-        if type_.contains(TypeFlags::T_M_K) && addr.get_opmask_idx() != 0 {
-            mask_idx = addr.get_opmask_idx();
+        let mut mask_idx = value.opmask_index();
+        if type_.contains(TypeFlags::T_M_K) && addr.opmask_index() != 0 {
+            mask_idx = addr.opmask_index();
         }
         if mask_idx == 0 {
             return Err(Error::K0IsInvalid);
         }
-        if !type_.contains(TypeFlags::T_M_K) && value.get_idx() == index.get_idx() {
+        if !type_.contains(TypeFlags::T_M_K) && value.index() == index.index() {
             return Err(Error::SameRegsAreInvalid);
         }
         self.buf
@@ -2628,7 +2628,7 @@ impl CodeAssembler {
         if addr.has_zero() {
             return Err(Error::InvalidZero);
         }
-        let index = *addr.get_reg_exp().get_index();
+        let index = *addr.register_expression().index();
         if index_is_ymm != index.is_ymm() || (!index_is_ymm && !index.is_zmm()) {
             return Err(Error::BadVsibAddressing);
         }
@@ -4151,7 +4151,7 @@ impl CodeAssembler {
         let xmm0 = Reg::xmm(0);
         match (dst, src) {
             (RegMem::Reg(dst), RegMem::Mem(src)) if dst.is_xmm() => {
-                let (type_, code) = if dst.get_idx() < 16 {
+                let (type_, code) = if dst.index() < 16 {
                     (TypeFlags::T_0F | TypeFlags::T_F3, 0x7E)
                 } else {
                     (
@@ -4166,7 +4166,7 @@ impl CodeAssembler {
                 self.op_avx_x_x_xm(dst, xmm0, src, type_, code, None)
             }
             (RegMem::Mem(dst), RegMem::Reg(src)) if src.is_xmm() => {
-                let code = if src.get_idx() < 16 { 0xD6 } else { 0x7E };
+                let code = if src.index() < 16 { 0xD6 } else { 0x7E };
                 self.op_avx_x_x_xm(
                     src,
                     xmm0,
@@ -4288,7 +4288,7 @@ impl CodeAssembler {
         control: TypeFlags,
         opcode: u8,
     ) -> Result<()> {
-        if !dst.is_reg() || !matches!(dst.get_bit(), 32 | 64) {
+        if !dst.is_reg() || !matches!(dst.bit_width(), 32 | 64) {
             return Err(Error::BadCombination);
         }
         let width = if dst.is_bit(64) {
@@ -4297,7 +4297,7 @@ impl CodeAssembler {
             TypeFlags::T_W0
         };
         self.op_avx_x_x_xm(
-            Reg::xmm(dst.get_idx()),
+            Reg::xmm(dst.index()),
             Reg::xmm(0),
             src,
             prefix | TypeFlags::T_0F | width | TypeFlags::T_EVEX | tuple | control,
@@ -4357,7 +4357,7 @@ impl CodeAssembler {
         type_: TypeFlags,
         opcode: u8,
     ) -> Result<()> {
-        if !dst.is_reg() || !matches!(dst.get_bit(), 32 | 64) {
+        if !dst.is_reg() || !matches!(dst.bit_width(), 32 | 64) {
             return Err(Error::BadCombination);
         }
         let width = if dst.is_bit(64) {
@@ -4455,10 +4455,10 @@ impl CodeAssembler {
         opcode: u8,
     ) -> Result<()> {
         let src = src.into();
-        if !dst.is_xmm() || !merge.is_xmm() || !matches!(src.get_bit(), 32 | 64) {
+        if !dst.is_xmm() || !merge.is_xmm() || !matches!(src.bit_width(), 32 | 64) {
             return Err(Error::BadCombination);
         }
-        let width = if src.get_bit() == 32 {
+        let width = if src.bit_width() == 32 {
             TypeFlags::T_W0 | TypeFlags::T_N4
         } else {
             TypeFlags::T_EW1 | TypeFlags::T_N8
@@ -5292,8 +5292,8 @@ impl CodeAssembler {
     #[inline]
     pub fn crc32(&mut self, dst: Reg, src: impl Into<RegMem>) -> Result<()> {
         let src = src.into();
-        let src_bit = src.get_bit();
-        let dst_bit = dst.get_bit();
+        let src_bit = src.bit_width();
+        let dst_bit = dst.bit_width();
         // r32 accepts 8/16/32 source; r64 accepts only 8/64 source
         if !((dst_bit == 32 && (src_bit == 8 || src_bit == 16 || src_bit == 32))
             || (dst_bit == 64 && (src_bit == 8 || src_bit == 64)))
@@ -5585,7 +5585,7 @@ impl CodeAssembler {
             return Err(Error::BadSizeOfRegister);
         }
         self.buf.op_rr(
-            &Reg::new(6, crate::operand::Kind::Reg, reg.get_bit()),
+            &Reg::new(6, crate::operand::Kind::Reg, reg.bit_width()),
             &reg,
             TypeFlags::T_0F,
             0xC7,
@@ -5597,7 +5597,7 @@ impl CodeAssembler {
             return Err(Error::BadSizeOfRegister);
         }
         self.buf.op_rr(
-            &Reg::new(7, crate::operand::Kind::Reg, reg.get_bit()),
+            &Reg::new(7, crate::operand::Kind::Reg, reg.bit_width()),
             &reg,
             TypeFlags::T_0F,
             0xC7,
@@ -6018,7 +6018,7 @@ impl CodeAssembler {
     // ── CMPXCHG ───────────────────────────────────────────────
     #[inline]
     pub fn cmpxchg(&mut self, op: impl Into<RegMem>, src: Reg) -> Result<()> {
-        let code = if src.get_bit() == 8 { 0xB0u8 } else { 0xB1u8 };
+        let code = if src.bit_width() == 8 { 0xB0u8 } else { 0xB1u8 };
         let op = op.into();
         match &op {
             RegMem::Reg(r) => self.buf.op_rr(&src, r, TypeFlags::T_0F, code),
@@ -6026,7 +6026,7 @@ impl CodeAssembler {
         }
     }
 
-    /// CMPXCHG8B: 0F C7 /1 [m64]  — atomic 8-byte compare-and-swap.
+    /// CMPXCHG8B: 0F C7 /1 `[m64]` — atomic 8-byte compare-and-swap.
     /// Compares EDX:EAX against the 8-byte memory operand; on equal,
     /// stores ECX:EBX → memory; otherwise loads memory → EDX:EAX.
     /// Mirrors xbyak's `void cmpxchg8b(const Address& addr) { opMR(addr, Reg32(1), T_0F, 0xC7); }`.
@@ -6040,7 +6040,7 @@ impl CodeAssembler {
         )
     }
 
-    /// CMPXCHG16B: REX.W 0F C7 /1 [m128] — atomic 16-byte compare-and-swap.
+    /// CMPXCHG16B: REX.W 0F C7 /1 `[m128]` — atomic 16-byte compare-and-swap.
     /// Compares RDX:RAX against the 16-byte memory operand; on equal,
     /// stores RCX:RBX → memory; otherwise loads memory → RDX:RAX.
     /// Required by upstream dynarmic's `EmitReadMemoryMov<128>` /
@@ -6058,7 +6058,7 @@ impl CodeAssembler {
     /// XADD: 0F C0/C1 /r
     #[inline]
     pub fn xadd(&mut self, op: impl Into<RegMem>, src: Reg) -> Result<()> {
-        let code = if src.get_bit() == 8 { 0xC0u8 } else { 0xC1u8 };
+        let code = if src.bit_width() == 8 { 0xC0u8 } else { 0xC1u8 };
         let op = op.into();
         match &op {
             RegMem::Reg(r) => self.buf.op_rr(&src, r, TypeFlags::T_0F, code),
@@ -6304,13 +6304,13 @@ impl CodeAssembler {
         // Need REX.W: use a 64-bit dummy reg to force W bit
         match &dst {
             RegMem::Reg(d) => {
-                let d64 = Reg::new(d.get_idx(), crate::operand::Kind::Reg, 64);
+                let d64 = Reg::new(d.index(), crate::operand::Kind::Reg, 64);
                 self.buf
                     .op_rr(&src, &d64, TypeFlags::T_66 | TypeFlags::T_0F3A, 0x16)?;
                 self.buf.db(imm)
             }
             RegMem::Mem(m) => {
-                let src64 = Reg::new(src.get_idx(), crate::operand::Kind::Xmm, 64);
+                let src64 = Reg::new(src.index(), crate::operand::Kind::Xmm, 64);
                 self.buf
                     .op_mr(m, &src64, TypeFlags::T_66 | TypeFlags::T_0F3A, 0x16)?;
                 self.buf.db(imm)
@@ -6373,7 +6373,7 @@ impl CodeAssembler {
     #[inline]
     pub fn pinsrq(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
         // Force REX.W by using 64-bit dst
-        let dst64 = Reg::new(dst.get_idx(), crate::operand::Kind::Xmm, 64);
+        let dst64 = Reg::new(dst.index(), crate::operand::Kind::Xmm, 64);
         self.buf.op_sse(
             &dst64,
             &src.into(),
@@ -6413,7 +6413,7 @@ impl CodeAssembler {
     pub fn vpextrw(&mut self, dst: impl Into<RegMem>, src: Reg, imm: u8) -> Result<()> {
         let dst = dst.into();
         let valid_dst = match dst {
-            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.get_bit(), 16 | 32 | 64),
+            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.bit_width(), 16 | 32 | 64),
             RegMem::Mem(_) => true,
         };
         if !valid_dst || !src.is_xmm() {
@@ -6423,9 +6423,9 @@ impl CodeAssembler {
         // Xbyak uses the compact VEX.66.0F C5 form only when both register
         // indices fit below 16. EGPR and memory destinations use 0F3A 15.
         if let RegMem::Reg(reg) = dst {
-            if src.get_idx() < 16 && reg.get_idx() < 16 {
+            if src.index() < 16 && reg.index() < 16 {
                 return self.buf.op_vex(
-                    &Reg::xmm(reg.get_idx()),
+                    &Reg::xmm(reg.index()),
                     Some(&Reg::xmm(0)),
                     &RegMem::Reg(src),
                     TypeFlags::T_66 | TypeFlags::T_0F,
@@ -6822,12 +6822,12 @@ impl CodeAssembler {
     #[inline]
     pub fn bswap(&mut self, reg: Reg) -> Result<()> {
         if reg.is_bit(64) {
-            self.buf.db(0x48 | if reg.get_idx() >= 8 { 1 } else { 0 })?;
-        } else if reg.get_idx() >= 8 {
+            self.buf.db(0x48 | if reg.index() >= 8 { 1 } else { 0 })?;
+        } else if reg.index() >= 8 {
             self.buf.db(0x41)?;
         }
         self.buf.db(0x0F)?;
-        self.buf.db(0xC8 + (reg.get_idx() & 7))
+        self.buf.db(0xC8 + (reg.index() & 7))
     }
 
     fn bmi_op_rro(
@@ -6852,7 +6852,7 @@ impl CodeAssembler {
     /// `rorx r32/r64, r/m32/r/m64, imm8` — VEX/APX.LZ.F2.0F3A.F0 /r ib.
     #[inline]
     pub fn rorx(&mut self, dst: Reg, src: impl Into<RegMem>, imm: u8) -> Result<()> {
-        let bit = dst.get_bit();
+        let bit = dst.bit_width();
         self.bmi_op_rro(
             dst,
             Reg::new(0, crate::operand::Kind::Reg, bit),
@@ -6874,7 +6874,7 @@ impl CodeAssembler {
         if !dst.is_reg() || (!dst.is_bit(32) && !dst.is_bit(64)) {
             return Err(Error::BadCombination);
         }
-        let extension = Reg::new(extension, crate::operand::Kind::Reg, dst.get_bit());
+        let extension = Reg::new(extension, crate::operand::Kind::Reg, dst.bit_width());
         self.buf.op_rro(
             &extension,
             &dst,
@@ -8644,7 +8644,7 @@ impl CodeAssembler {
     /// Helper: x87 register-register op: escape_byte + (modrm_base + st_idx)
     fn fpu_st(&mut self, escape: u8, modrm_base: u8, st: Reg) -> Result<()> {
         self.buf.db(escape)?;
-        self.buf.db(modrm_base + st.get_idx())
+        self.buf.db(modrm_base + st.index())
     }
 
     /// Helper: x87 memory op with extension digit
@@ -8652,7 +8652,7 @@ impl CodeAssembler {
         let r = Reg::new(ext, crate::operand::Kind::Reg, 32);
         self.buf.emit_rex_for_reg_mem(&r, addr, TypeFlags::NONE)?;
         self.buf.db(escape)?;
-        self.buf.emit_addr(addr, r.get_idx())
+        self.buf.emit_addr(addr, r.index())
     }
 
     /// Xbyak `opFpuMem`: select the escape byte from the declared memory size.
@@ -8669,7 +8669,7 @@ impl CodeAssembler {
         if addr.is_64bit_disp() {
             return Err(Error::CantUse64BitDisp);
         }
-        let code = match addr.get_bit() {
+        let code = match addr.bit_width() {
             16 => m16,
             32 => m32,
             64 => m64,
@@ -8678,7 +8678,7 @@ impl CodeAssembler {
         if code == 0 {
             return Err(Error::BadMemSize);
         }
-        if m64_ext != 0 && addr.get_bit() == 64 {
+        if m64_ext != 0 && addr.bit_width() == 64 {
             ext = m64_ext;
         }
         self.buf
@@ -9218,7 +9218,7 @@ impl CodeAssembler {
     /// Xbyak's register overload accepts AX and rejects every other Reg16.
     #[inline]
     pub fn fstsw_reg(&mut self, reg: Reg) -> Result<()> {
-        if !reg.is_reg_bit(16) || reg.get_idx() != 0 {
+        if !reg.is_reg_bit(16) || reg.index() != 0 {
             return Err(Error::BadParameter);
         }
         self.fstsw_ax()
@@ -9457,7 +9457,7 @@ impl CodeAssembler {
             0x49,
             false,
         )?;
-        self.buf.set_modrm(3, bsr.get_idx(), 0)
+        self.buf.set_modrm(3, bsr.index(), 0)
     }
 
     /// `bsrmovf bsr0, zmm, zmm/m512`
@@ -9542,8 +9542,8 @@ impl CodeAssembler {
         }
         let addr = addr.clone_no_optimize();
         if opcode != 0x49 {
-            let exp = addr.get_reg_exp();
-            if exp.get_base().get_bit() == 0 || exp.get_index().get_bit() == 0 {
+            let exp = addr.register_expression();
+            if exp.base().bit_width() == 0 || exp.index().bit_width() == 0 {
                 return Err(Error::NotSupported);
             }
         }
@@ -10440,13 +10440,17 @@ impl CodeAssembler {
         opcode: u8,
     ) -> Result<()> {
         let valid_src = match src {
-            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.get_bit(), 32 | 64),
+            RegMem::Reg(reg) => reg.is_reg() && matches!(reg.bit_width(), 32 | 64),
             RegMem::Mem(_) => true,
         };
         if !dst.is_xmm() || !merge.is_xmm() || !valid_src {
             return Err(Error::BadSizeOfRegister);
         }
-        let width_type = if src.get_bit() == 64 { type64 } else { type32 };
+        let width_type = if src.bit_width() == 64 {
+            type64
+        } else {
+            type32
+        };
         self.buf
             .op_vex(&dst, Some(&merge), &src, type_ | width_type, opcode, None)
     }
@@ -10467,7 +10471,7 @@ impl CodeAssembler {
 
     // Xbyak opCvt5: (x, x/y/z/xword/yword/zword).
     fn op_cvt5(&mut self, dst: Reg, src: RegMem, type_: TypeFlags, opcode: u8) -> Result<()> {
-        let src_bit = src.get_bit();
+        let src_bit = src.bit_width();
         if !dst.is_xmm() || !matches!(src_bit, 128 | 256 | 512) {
             return Err(Error::BadCombination);
         }
@@ -10491,7 +10495,10 @@ impl CodeAssembler {
         type_: TypeFlags,
         opcode: u8,
     ) -> Result<()> {
-        if !dst.is_xmm() || !bias.is_simd() || (!src.is_mem() && src.get_bit() != bias.get_bit()) {
+        if !dst.is_xmm()
+            || !bias.is_simd()
+            || (!src.is_mem() && src.bit_width() != bias.bit_width())
+        {
             return Err(Error::BadCombination);
         }
         self.buf

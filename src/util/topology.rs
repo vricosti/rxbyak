@@ -62,7 +62,7 @@ impl CpuMask {
     }
 
     /// Append indices parsed from `(integer|range)[,(integer|range)]*`.
-    pub fn set_str(&mut self, value: &str) -> Result<()> {
+    pub fn append_str(&mut self, value: &str) -> Result<()> {
         if value.is_empty() {
             return Ok(());
         }
@@ -91,7 +91,7 @@ impl CpuMask {
         Ok(())
     }
 
-    pub fn get_str(&self) -> String {
+    pub fn range_string(&self) -> String {
         let mut result = String::new();
         let mut values = self.indices.iter().copied().peekable();
         while let Some(first) = values.next() {
@@ -123,7 +123,7 @@ impl CpuMask {
         if let Some(label) = label {
             print!("{label}: ");
         }
-        println!("{}", self.get_str());
+        println!("{}", self.range_string());
     }
 }
 
@@ -427,8 +427,8 @@ fn init_topology(topo: &mut CpuTopology) -> bool {
     true
 }
 
-pub fn get_core_type() -> CoreType {
-    let eax = Cpu::get_cpuid_ex(0x1a, 0)[0];
+pub fn core_type() -> CoreType {
+    let eax = Cpu::cpuid_with_subleaf(0x1a, 0)[0];
     match (eax >> 24) & 0xff {
         0x40 => CoreType::Performance,
         0x20 => CoreType::Efficient,
@@ -443,7 +443,7 @@ fn read_cpu_mask_from_file(path: &str) -> Option<CpuMask> {
 }
 
 #[cfg(target_os = "linux")]
-fn set_affinity_and_get_core_type(cpu: u32) -> CoreType {
+fn core_type_with_affinity(cpu: u32) -> CoreType {
     unsafe {
         let mut mask: libc::cpu_set_t = std::mem::zeroed();
         libc::CPU_ZERO(&mut mask);
@@ -457,7 +457,7 @@ fn set_affinity_and_get_core_type(cpu: u32) -> CoreType {
             return CoreType::Standard;
         }
     }
-    get_core_type()
+    core_type()
 }
 
 #[cfg(target_os = "linux")]
@@ -474,7 +474,7 @@ fn update_core_types_with_affinity(topo: &mut CpuTopology) {
             return;
         }
         for (index, cpu) in topo.logical_cpus.iter_mut().enumerate() {
-            cpu.core_type = set_affinity_and_get_core_type(index as u32);
+            cpu.core_type = core_type_with_affinity(index as u32);
         }
         let _ = libc::sched_setaffinity(
             0,
@@ -897,7 +897,7 @@ fn parse_size(s: &str) -> u32 {
 #[cfg(any(target_os = "linux", test))]
 fn parse_cpu_list(s: &str) -> Result<CpuMask> {
     let mut mask = CpuMask::new();
-    mask.set_str(s)?;
+    mask.append_str(s)?;
     Ok(mask)
 }
 
@@ -912,7 +912,7 @@ mod tests {
         mask.append(1).unwrap();
         mask.append(3).unwrap();
         mask.append_range(5, 7).unwrap();
-        assert_eq!(mask.get_str(), "1,3,5-7");
+        assert_eq!(mask.range_string(), "1,3,5-7");
         assert_eq!(mask.len(), 5);
         assert_eq!(mask.get(3), Some(6));
         assert_eq!(mask.get(5), None);
@@ -932,7 +932,7 @@ mod tests {
         for invalid in ["1,", ",1", "2-1", "1--2", "a", "1,1", "1024"] {
             let mut mask = CpuMask::new();
             assert_eq!(
-                mask.set_str(invalid).unwrap_err(),
+                mask.append_str(invalid).unwrap_err(),
                 Error::InvalidCpumaskIndex,
                 "input={invalid}"
             );
@@ -942,7 +942,7 @@ mod tests {
     #[test]
     fn test_parse_cpu_list() {
         let mask = parse_cpu_list("0-3,5,7,10-12").unwrap();
-        assert_eq!(mask.get_str(), "0-3,5,7,10-12");
+        assert_eq!(mask.range_string(), "0-3,5,7,10-12");
         assert_eq!(
             mask.iter().collect::<Vec<_>>(),
             [0, 1, 2, 3, 5, 7, 10, 11, 12]
@@ -980,7 +980,7 @@ mod tests {
         assert!(topology.logical_cpu_count() < CPU_MASK_LIMIT as usize);
         assert!(topology.physical_core_count() > 0);
         assert!(matches!(
-            get_core_type(),
+            core_type(),
             CoreType::Performance | CoreType::Efficient | CoreType::Standard
         ));
     }

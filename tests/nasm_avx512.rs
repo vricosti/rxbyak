@@ -21,9 +21,9 @@ macro_rules! skip_if_no_nasm {
 #[test]
 fn test_nasm_evex_basic_float() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vaddps", |a, d, s1, s2| a.vaddps(d, s1, s2)),
         ("vaddpd", |a, d, s1, s2| a.vaddpd(d, s1, s2)),
         ("vsubps", |a, d, s1, s2| a.vsubps(d, s1, s2)),
@@ -66,9 +66,9 @@ fn test_nasm_evex_basic_float() {
 #[test]
 fn test_nasm_evex_int_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vpaddd", |a, d, s1, s2| a.vpaddd(d, s1, s2)),
         ("vpsubd", |a, d, s1, s2| a.vpsubd(d, s1, s2)),
     ];
@@ -95,7 +95,7 @@ fn test_nasm_evex_int_ops() {
 #[test]
 fn test_nasm_packed_qword_immediate_shifts() {
     let nasm = skip_if_no_nasm!();
-    let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
+    let insns: InstructionBatch = vec![
         (
             "vpsllq xmm3, xmm4, 7".into(),
             Box::new(|a| a.vpsllq_imm(XMM3, XMM4, 7)),
@@ -154,9 +154,9 @@ fn test_nasm_packed_qword_immediate_shifts() {
 #[test]
 fn test_nasm_evex_only_int() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vpandd", |a, d, s1, s2| a.vpandd(d, s1, s2)),
         ("vpandq", |a, d, s1, s2| a.vpandq(d, s1, s2)),
         ("vpord", |a, d, s1, s2| a.vpord(d, s1, s2)),
@@ -190,7 +190,7 @@ fn test_nasm_evex_only_int() {
 #[test]
 fn test_nasm_evex_opmask() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // vpaddd zmm{k1}, zmm, zmm
     for k in 1u8..=7 {
@@ -223,7 +223,7 @@ fn test_nasm_evex_opmask() {
 #[test]
 fn test_nasm_evex_zeroing() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // vpaddd zmm{k1}{z}, zmm, zmm
     let asm_text = "vpaddd zmm0{k1}{z}, zmm1, zmm2".to_string();
@@ -269,7 +269,7 @@ fn test_nasm_evex_zeroing() {
 #[test]
 fn test_nasm_evex_extended_regs() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let triples: &[(Reg, &str, Reg, &str, Reg, &str)] = &[
         (ZMM16, "zmm16", ZMM17, "zmm17", ZMM18, "zmm18"),
@@ -304,9 +304,9 @@ fn test_nasm_evex_extended_regs() {
 #[test]
 fn test_nasm_evex_mov() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("vmovdqa32", |a, d, s| a.vmovdqa32(d, s)),
         ("vmovdqa64", |a, d, s| a.vmovdqa64(d, s)),
         ("vmovdqu32", |a, d, s| a.vmovdqu32(d, s)),
@@ -337,7 +337,7 @@ fn test_nasm_evex_mov() {
 #[test]
 fn test_nasm_evex_vpternlog() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let imm_values: &[u8] = &[0x00, 0xFF, 0xDB, 0x96];
     for &imm in imm_values {
@@ -364,7 +364,7 @@ fn test_nasm_evex_vpternlog() {
 #[test]
 fn test_nasm_evex_broadcast() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // vpaddd zmm0, zmm1, dword [rax]{1to16}
     let asm_text = "vpaddd zmm0, zmm1, dword [rax]{1to16}".to_string();
@@ -409,7 +409,7 @@ fn test_nasm_evex_broadcast() {
 #[test]
 fn test_nasm_evex_rounding() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // vaddps zmm0, zmm1, zmm2, {rn-sae}
     let asm_text = "vaddps zmm0, zmm1, zmm2, {rn-sae}".to_string();
@@ -470,7 +470,7 @@ fn test_nasm_evex_rounding() {
 #[test]
 fn test_nasm_evex_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // vaddps zmm, zmm, [mem]
     let asm_text = "vaddps zmm0, zmm1, zword [rax]".to_string();
@@ -513,9 +513,9 @@ fn test_nasm_evex_mem() {
 #[test]
 fn test_nasm_evex_fma() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vfmadd132ps", |a, d, s1, s2| a.vfmadd132ps(d, s1, s2)),
         ("vfmadd213ps", |a, d, s1, s2| a.vfmadd213ps(d, s1, s2)),
         ("vfmadd231ps", |a, d, s1, s2| a.vfmadd231ps(d, s1, s2)),

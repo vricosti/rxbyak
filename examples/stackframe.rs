@@ -15,7 +15,7 @@ fn main() -> Result<()> {
         sf.close(&mut asm)?;
         asm.ready()?;
 
-        let f: fn(i64, i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64, i64) -> i64 = unsafe { asm.as_fn() };
         let ret = f(3, 5, 2);
         if ret == 3 + 5 + 2 {
             println!("3 + 5 + 2 = {} ok", ret);
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
         sf.close(&mut asm)?;
         asm.ready()?;
 
-        let f: fn(i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64) -> i64 = unsafe { asm.as_fn() };
         let ret = f(100, 200);
         if ret == 300 {
             println!("100 + 200 = {} ok", ret);

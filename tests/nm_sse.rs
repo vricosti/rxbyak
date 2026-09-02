@@ -1,3 +1,5 @@
+#![allow(clippy::vec_init_then_push)]
+
 /// SSE/SSE2/SSE3/SSSE3/SSE4 instruction NASM conformance tests.
 mod common;
 
@@ -28,7 +30,7 @@ fn test_nm_sse_arith_rr() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("addps", |a, d, s| a.addps(d, s)),
         ("addpd", |a, d, s| a.addpd(d, s)),
         ("addss", |a, d, s| a.addss(d, s)),
@@ -76,7 +78,7 @@ fn test_nm_sse_arith_rm() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Address) -> Result<()>)] = &[
+    let ops: &[RegAddressOp] = &[
         ("addps", |a, d, m| a.addps(d, m)),
         ("addpd", |a, d, m| a.addpd(d, m)),
         ("subps", |a, d, m| a.subps(d, m)),
@@ -106,7 +108,7 @@ fn test_nm_sse_logic() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("andps", |a, d, s| a.andps(d, s)),
         ("andpd", |a, d, s| a.andpd(d, s)),
         ("orps", |a, d, s| a.orps(d, s)),
@@ -144,7 +146,7 @@ fn test_nm_sse_mov() {
     let mut insns: Vec<NmPair> = Vec::new();
 
     // reg, reg
-    let mov_ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let mov_ops: &[RegBinaryOp] = &[
         ("movaps", |a, d, s| a.movaps(d, s)),
         ("movups", |a, d, s| a.movups(d, s)),
         ("movapd", |a, d, s| a.movapd(d, s)),
@@ -170,7 +172,7 @@ fn test_nm_sse_mov() {
     }
 
     // reg, mem (load)
-    let load_ops: &[(&str, fn(&mut CodeAssembler, Reg, Address) -> Result<()>)] = &[
+    let load_ops: &[RegAddressOp] = &[
         ("movaps", |a, d, m| a.movaps(d, m)),
         ("movups", |a, d, m| a.movups(d, m)),
         ("movapd", |a, d, m| a.movapd(d, m)),
@@ -189,7 +191,7 @@ fn test_nm_sse_mov() {
     }
 
     // mem, reg (store)
-    let store_ops: &[(&str, fn(&mut CodeAssembler, Address, Reg) -> Result<()>)] = &[
+    let store_ops: &[AddressRegOp] = &[
         ("movaps", |a, m, s| a.movaps(m, s)),
         ("movups", |a, m, s| a.movups(m, s)),
         ("movapd", |a, m, s| a.movapd(m, s)),
@@ -333,47 +335,47 @@ fn test_nm_sse_movhlps() {
     for (addr, nasm_mem) in mems64() {
         // movhps xmm, [mem]
         let asm = format!("movhps xmm0, {}", nasm_mem);
-        let a1 = addr.clone();
+        let a1 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movhps_load(XMM0, a1)),
         ));
         // movhps [mem], xmm
         let asm = format!("movhps {}, xmm0", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movhps_store(a2, XMM0)),
         ));
         // movlps xmm, [mem]
         let asm = format!("movlps xmm0, {}", nasm_mem);
-        let a3 = addr.clone();
+        let a3 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movlps_load(XMM0, a3)),
         ));
         // movlps [mem], xmm
         let asm = format!("movlps {}, xmm0", nasm_mem);
-        let a4 = addr.clone();
+        let a4 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movlps_store(a4, XMM0)),
         ));
         // movhpd / movlpd
         let asm = format!("movhpd xmm0, {}", nasm_mem);
-        let a5 = addr.clone();
+        let a5 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movhpd_load(XMM0, a5)),
         ));
         let asm = format!("movhpd {}, xmm0", nasm_mem);
-        let a6 = addr.clone();
+        let a6 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movhpd_store(a6, XMM0)),
         ));
         let asm = format!("movlpd xmm0, {}", nasm_mem);
-        let a7 = addr.clone();
+        let a7 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movlpd_load(XMM0, a7)),
@@ -397,7 +399,7 @@ fn test_nm_sse_int() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("paddb", |a, d, s| a.paddb(d, s)),
         ("paddw", |a, d, s| a.paddw(d, s)),
         ("paddd", |a, d, s| a.paddd(d, s)),
@@ -448,7 +450,7 @@ fn test_nm_sse_pack() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("punpcklbw", |a, d, s| a.punpcklbw(d, s)),
         ("punpcklwd", |a, d, s| a.punpcklwd(d, s)),
         ("punpckldq", |a, d, s| a.punpckldq(d, s)),
@@ -638,7 +640,7 @@ fn test_nm_sse_cmp() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("comiss", |a, d, s| a.comiss(d, s)),
         ("comisd", |a, d, s| a.comisd(d, s)),
         ("ucomiss", |a, d, s| a.ucomiss(d, s)),
@@ -793,13 +795,13 @@ fn test_nm_sse_misc() {
     // non-temporal SSE stores
     for (addr, nasm_mem) in mems128() {
         let asm = format!("movntps {}, xmm0", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movntps(a2, XMM0)),
         ));
         let asm = format!("movntpd {}, xmm0", nasm_mem);
-        let a3 = addr.clone();
+        let a3 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movntpd(a3, XMM0)),

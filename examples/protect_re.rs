@@ -10,7 +10,7 @@ fn test1() -> Result<()> {
     asm.ret()?;
 
     asm.set_protect_mode_re()?;
-    let f: fn() -> i32 = unsafe { asm.get_code() };
+    let f: fn() -> i32 = unsafe { asm.as_fn() };
     println!("f={}", f());
 
     asm.set_protect_mode_rw()?;
@@ -26,7 +26,7 @@ fn test2() -> Result<()> {
     asm.ret()?;
 
     asm.ready_re()?;
-    let f: fn() -> i32 = unsafe { asm.get_code() };
+    let f: fn() -> i32 = unsafe { asm.as_fn() };
     println!("f={}", f());
 
     asm.set_protect_mode_rw()?;

@@ -268,11 +268,11 @@ impl StackFrame {
         let mut pos = 0usize;
         let mut p = [Reg::gpr64(0); MAX_PARAMS];
         for slot in p.iter_mut().take(p_num) {
-            *slot = get_reg_idx(&mut pos, use_regs);
+            *slot = next_register(&mut pos, use_regs);
         }
         let mut t = [Reg::gpr64(0); MAX_TEMPS];
         for slot in t.iter_mut().take(t_num_actual) {
-            *slot = get_reg_idx(&mut pos, use_regs);
+            *slot = next_register(&mut pos, use_regs);
         }
         for slot in reg_slot_table() {
             if use_regs & use_flag_of(slot.target) != 0 && slot.pos < p_num {
@@ -407,7 +407,7 @@ fn reg_slot_table() -> &'static [RegSlot; MAX_PARAMS] {
 }
 
 fn use_flag_of(reg: Reg) -> usize {
-    match reg.get_idx() {
+    match reg.index() {
         1 => USE_RCX,
         2 => USE_RDX,
         6 => USE_RSI,
@@ -417,7 +417,7 @@ fn use_flag_of(reg: Reg) -> usize {
     }
 }
 
-fn get_reg_idx(pos: &mut usize, use_regs: usize) -> Reg {
+fn next_register(pos: &mut usize, use_regs: usize) -> Reg {
     loop {
         let r = REG_ORDER[*pos];
         *pos += 1;
@@ -488,8 +488,8 @@ mod tests {
     #[test]
     fn test_get_reg_idx_no_skip() {
         let mut pos = 0;
-        let r0 = get_reg_idx(&mut pos, 0);
-        let r1 = get_reg_idx(&mut pos, 0);
+        let r0 = next_register(&mut pos, 0);
+        let r1 = next_register(&mut pos, 0);
         assert_eq!(r0, REG_ORDER[0]);
         assert_eq!(r1, REG_ORDER[1]);
         assert_eq!(pos, 2);

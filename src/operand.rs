@@ -168,23 +168,23 @@ impl Reg {
         self.idx
     }
     /// Get the register index (0..31), stripping ext8bit flag.
-    pub const fn get_idx(&self) -> u8 {
+    pub const fn index(&self) -> u8 {
         self.idx & (EXT8BIT - 1)
     }
     /// Get the register kind.
-    pub const fn get_kind(&self) -> Kind {
+    pub const fn kind(&self) -> Kind {
         self.kind
     }
     /// Get the bit width.
-    pub const fn get_bit(&self) -> u16 {
+    pub const fn bit_width(&self) -> u16 {
         self.bit
     }
     /// Get the opmask index (0 = no mask).
-    pub const fn get_opmask_idx(&self) -> u8 {
+    pub const fn opmask_index(&self) -> u8 {
         self.mask
     }
     /// Get the rounding mode.
-    pub const fn get_rounding(&self) -> Rounding {
+    pub const fn rounding_mode(&self) -> Rounding {
         self.rounding
     }
     /// Whether zeroing masking is enabled.
@@ -192,11 +192,11 @@ impl Reg {
         self.zero
     }
     /// Whether NF (no-flags) is set.
-    pub const fn get_nf(&self) -> bool {
+    pub const fn no_flags(&self) -> bool {
         self.nf
     }
     /// Whether ZU is set.
-    pub const fn get_zu(&self) -> bool {
+    pub const fn zero_upper(&self) -> bool {
         self.zu
     }
 
@@ -254,22 +254,22 @@ impl Reg {
 
     /// Is this a high 8-bit register (ah, ch, dh, bh)?
     pub fn is_high8bit(&self) -> bool {
-        self.bit == 8 && !self.is_ext8bit() && (4..8).contains(&self.get_idx())
+        self.bit == 8 && !self.is_ext8bit() && (4..8).contains(&self.index())
     }
 
     /// Does the index have bit N set (for REX)?
     pub fn has_idx_bit(&self, bit: u32) -> bool {
-        self.get_idx() & (1 << bit) != 0
+        self.index() & (1 << bit) != 0
     }
 
     /// Does this register need an extended index (idx >= 8)?
     pub fn is_ext_idx(&self) -> bool {
-        (self.get_idx() & 8) != 0
+        (self.index() & 8) != 0
     }
 
     /// Does this register need an extended index 2 (idx >= 16)?
     pub fn is_ext_idx2(&self) -> bool {
-        (self.get_idx() & 16) != 0
+        (self.index() & 16) != 0
     }
 
     /// Does this register require EVEX encoding?
@@ -331,7 +331,7 @@ impl Reg {
     }
 
     /// Set opmask index (mutable in place).
-    pub fn set_opmask_idx(&mut self, idx: u8) -> Result<()> {
+    pub fn set_opmask_index(&mut self, idx: u8) -> Result<()> {
         if self.mask != 0 && self.mask != idx {
             return Err(Error::OpmaskIsAlreadySet);
         }
@@ -351,7 +351,7 @@ impl Reg {
     /// Convert this register to a different bit width.
     pub fn change_bit(&self, bit: u16) -> Result<Reg> {
         let mut r = *self;
-        let idx = r.get_idx();
+        let idx = r.index();
         match bit {
             8 => {
                 if idx >= 32 {
@@ -477,10 +477,10 @@ impl RegMem {
         }
     }
 
-    pub fn get_bit(&self) -> u16 {
+    pub fn bit_width(&self) -> u16 {
         match self {
-            RegMem::Reg(r) => r.get_bit(),
-            RegMem::Mem(m) => m.get_bit(),
+            RegMem::Reg(r) => r.bit_width(),
+            RegMem::Mem(m) => m.bit_width(),
         }
     }
 
@@ -565,8 +565,8 @@ mod tests {
     #[test]
     fn test_gpr_construction() {
         let eax = Reg::gpr32(0);
-        assert_eq!(eax.get_idx(), 0);
-        assert_eq!(eax.get_bit(), 32);
+        assert_eq!(eax.index(), 0);
+        assert_eq!(eax.bit_width(), 32);
         assert!(eax.is_reg());
         assert!(!eax.is_xmm());
     }
@@ -575,8 +575,8 @@ mod tests {
     fn test_ext8bit() {
         let spl = Reg::new_ext8(4);
         assert!(spl.is_ext8bit());
-        assert_eq!(spl.get_idx(), 4);
-        assert_eq!(spl.get_bit(), 8);
+        assert_eq!(spl.index(), 4);
+        assert_eq!(spl.bit_width(), 8);
     }
 
     #[test]
@@ -592,7 +592,7 @@ mod tests {
         let xmm0 = Reg::xmm(0);
         assert!(xmm0.is_xmm());
         assert!(xmm0.is_simd());
-        assert_eq!(xmm0.get_bit(), 128);
+        assert_eq!(xmm0.bit_width(), 128);
 
         let zmm31 = Reg::zmm(31);
         assert!(zmm31.is_zmm());
@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn test_opmask_modifier() {
         let xmm0 = Reg::xmm(0).k(1).z();
-        assert_eq!(xmm0.get_opmask_idx(), 1);
+        assert_eq!(xmm0.opmask_index(), 1);
         assert!(xmm0.has_zero());
     }
 
@@ -611,11 +611,11 @@ mod tests {
     fn test_change_bit() {
         let eax = Reg::gpr32(0);
         let rax = eax.cvt64().unwrap();
-        assert_eq!(rax.get_bit(), 64);
+        assert_eq!(rax.bit_width(), 64);
         assert!(rax.is_reg());
 
         let xmm = eax.cvt128().unwrap();
         assert!(xmm.is_xmm());
-        assert_eq!(xmm.get_bit(), 128);
+        assert_eq!(xmm.bit_width(), 128);
     }
 }

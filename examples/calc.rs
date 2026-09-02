@@ -105,8 +105,8 @@ impl FuncGen {
         self.asm.ready()
     }
 
-    fn get_func(&self) -> fn(*const f64) -> f64 {
-        unsafe { self.asm.get_code() }
+    fn assemble_function(&self) -> fn(*const f64) -> f64 {
+        unsafe { self.asm.as_fn() }
     }
 }
 
@@ -255,7 +255,7 @@ fn main() -> Result<()> {
     parser.parse_expr(&mut gen)?;
     gen.complete()?;
 
-    let func = gen.get_func();
+    let func = gen.assemble_function();
 
     println!("64bit mode");
 

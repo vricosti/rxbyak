@@ -10,6 +10,39 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+pub type Instruction = (String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>);
+pub type InstructionBatch = Vec<Instruction>;
+pub type RegUnaryOp = (&'static str, fn(&mut CodeAssembler, Reg) -> Result<()>);
+pub type RegBinaryOp = (&'static str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>);
+pub type RegTernaryOp = (
+    &'static str,
+    fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>,
+);
+pub type RegI32Op = (&'static str, fn(&mut CodeAssembler, Reg, i32) -> Result<()>);
+pub type RegU8Op = (&'static str, fn(&mut CodeAssembler, Reg, u8) -> Result<()>);
+pub type RegAddressOp = (
+    &'static str,
+    fn(&mut CodeAssembler, Reg, Address) -> Result<()>,
+);
+pub type AddressUnaryOp = (&'static str, fn(&mut CodeAssembler, Address) -> Result<()>);
+pub type AddressRegOp = (
+    &'static str,
+    fn(&mut CodeAssembler, Address, Reg) -> Result<()>,
+);
+pub type AddressI32Op = (
+    &'static str,
+    fn(&mut CodeAssembler, Address, i32) -> Result<()>,
+);
+pub type AddressU8Op = (
+    &'static str,
+    fn(&mut CodeAssembler, Address, u8) -> Result<()>,
+);
+pub type NamedAddressOp = (
+    &'static str,
+    fn(&mut CodeAssembler, Address) -> Result<()>,
+    &'static str,
+);
+
 /// Try to locate the NASM executable.
 /// Checks PATH first, then the known Windows location via WSL.
 pub fn find_nasm() -> Option<String> {
@@ -246,11 +279,7 @@ pub fn assemble(f: impl FnOnce(&mut CodeAssembler) -> Result<()>) -> Vec<u8> {
 /// Compare rxbyak output against NASM for a batch of instructions.
 /// `instructions` is a list of (nasm_text, rxbyak_closure) pairs.
 /// All NASM instructions are assembled in one invocation for efficiency.
-pub fn compare_nasm_batch(
-    nasm_path: &str,
-    bits: u32,
-    instructions: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)>,
-) {
+pub fn compare_nasm_batch(nasm_path: &str, bits: u32, instructions: InstructionBatch) {
     // Build NASM source
     let nasm_source: String = instructions
         .iter()
@@ -622,11 +651,7 @@ pub fn normalize_prefix(bytes: &[u8]) -> Vec<u8> {
 }
 
 /// Like `compare_nasm_batch` but normalizes legacy prefix order before comparing.
-pub fn compare_nasm_batch_normalized(
-    nasm_path: &str,
-    bits: u32,
-    instructions: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)>,
-) {
+pub fn compare_nasm_batch_normalized(nasm_path: &str, bits: u32, instructions: InstructionBatch) {
     let nasm_source: String = instructions
         .iter()
         .map(|(asm, _)| asm.as_str())

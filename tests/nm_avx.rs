@@ -1,3 +1,5 @@
+#![allow(clippy::vec_init_then_push)]
+
 /// AVX/AVX2 instruction NASM conformance tests (VEX 3-operand forms).
 mod common;
 
@@ -27,7 +29,7 @@ fn test_nm_avx_arith_xmm() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vaddps", |a, d, s1, s2| a.vaddps(d, s1, s2)),
         ("vaddpd", |a, d, s1, s2| a.vaddpd(d, s1, s2)),
         ("vaddss", |a, d, s1, s2| a.vaddss(d, s1, s2)),
@@ -70,7 +72,7 @@ fn test_nm_avx_arith_ymm() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vaddps", |a, d, s1, s2| a.vaddps(d, s1, s2)),
         ("vaddpd", |a, d, s1, s2| a.vaddpd(d, s1, s2)),
         ("vsubps", |a, d, s1, s2| a.vsubps(d, s1, s2)),
@@ -130,7 +132,7 @@ fn test_nm_avx_logic() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vandps", |a, d, s1, s2| a.vandps(d, s1, s2)),
         ("vandpd", |a, d, s1, s2| a.vandpd(d, s1, s2)),
         ("vorps", |a, d, s1, s2| a.vorps(d, s1, s2)),
@@ -180,7 +182,7 @@ fn test_nm_avx_mov() {
     let mut insns: Vec<NmPair> = Vec::new();
 
     // reg, reg (xmm)
-    let mov_ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let mov_ops: &[RegBinaryOp] = &[
         ("vmovaps", |a, d, s| a.vmovaps(d, s)),
         ("vmovups", |a, d, s| a.vmovups(d, s)),
         ("vmovapd", |a, d, s| a.vmovapd(d, s)),
@@ -212,7 +214,7 @@ fn test_nm_avx_mov() {
     }
 
     // load/store with memory
-    let load_ops: &[(&str, fn(&mut CodeAssembler, Reg, Address) -> Result<()>)] = &[
+    let load_ops: &[RegAddressOp] = &[
         ("vmovaps", |a, d, m| a.vmovaps(d, m)),
         ("vmovups", |a, d, m| a.vmovups(d, m)),
         ("vmovdqa", |a, d, m| a.vmovdqa(d, m)),
@@ -234,7 +236,7 @@ fn test_nm_avx_mov() {
         }
     }
 
-    let store_ops: &[(&str, fn(&mut CodeAssembler, Address, Reg) -> Result<()>)] = &[
+    let store_ops: &[AddressRegOp] = &[
         ("vmovaps", |a, m, s| a.vmovaps(m, s)),
         ("vmovups", |a, m, s| a.vmovups(m, s)),
         ("vmovdqa", |a, m, s| a.vmovdqa(m, s)),
@@ -261,7 +263,7 @@ fn test_nm_avx_int() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegTernaryOp] = &[
         ("vpaddd", |a, d, s1, s2| a.vpaddd(d, s1, s2)),
         ("vpsubd", |a, d, s1, s2| a.vpsubd(d, s1, s2)),
         ("vpand", |a, d, s1, s2| a.vpand(d, s1, s2)),
@@ -373,7 +375,7 @@ fn test_nm_avx_fma() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let fma_ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let fma_ops: &[RegTernaryOp] = &[
         ("vfmadd132ps", |a, d, s1, s2| a.vfmadd132ps(d, s1, s2)),
         ("vfmadd213ps", |a, d, s1, s2| a.vfmadd213ps(d, s1, s2)),
         ("vfmadd231ps", |a, d, s1, s2| a.vfmadd231ps(d, s1, s2)),
@@ -415,7 +417,7 @@ fn test_nm_avx_fma() {
     // YMM variants (packed only)
     let ymm_triples: &[(Reg, &str, Reg, &str, Reg, &str)] =
         &[(YMM0, "ymm0", YMM1, "ymm1", YMM2, "ymm2")];
-    let fma_ymm: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let fma_ymm: &[RegTernaryOp] = &[
         ("vfmadd132ps", |a, d, s1, s2| a.vfmadd132ps(d, s1, s2)),
         ("vfmadd213ps", |a, d, s1, s2| a.vfmadd213ps(d, s1, s2)),
         ("vfmadd231ps", |a, d, s1, s2| a.vfmadd231ps(d, s1, s2)),
@@ -620,13 +622,13 @@ fn test_nm_avx_misc() {
     // vmovntps/pd/dq
     for (addr, nasm_mem) in mems128() {
         let asm = format!("vmovntps {}, xmm0", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovntps(a2, XMM0)),
         ));
         let asm = format!("vmovntpd {}, xmm0", nasm_mem);
-        let a3 = addr.clone();
+        let a3 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovntpd(a3, XMM0)),
@@ -702,47 +704,47 @@ fn test_nm_avx_special() {
     // vmovhps xmm, xmm, [mem] (3-op load)
     for (addr, nasm_mem) in mems64() {
         let asm = format!("vmovhps xmm0, xmm1, {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovhps_load(XMM0, XMM1, a2)),
         ));
         // vmovhps [mem], xmm (store)
         let asm = format!("vmovhps {}, xmm0", nasm_mem);
-        let a3 = addr.clone();
+        let a3 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovhps_store(a3, XMM0)),
         ));
         // vmovlps
         let asm = format!("vmovlps xmm0, xmm1, {}", nasm_mem);
-        let a4 = addr.clone();
+        let a4 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovlps_load(XMM0, XMM1, a4)),
         ));
         let asm = format!("vmovlps {}, xmm0", nasm_mem);
-        let a5 = addr.clone();
+        let a5 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovlps_store(a5, XMM0)),
         ));
         // vmovhpd
         let asm = format!("vmovhpd xmm0, xmm1, {}", nasm_mem);
-        let a6 = addr.clone();
+        let a6 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovhpd_load(XMM0, XMM1, a6)),
         ));
         let asm = format!("vmovhpd {}, xmm0", nasm_mem);
-        let a7 = addr.clone();
+        let a7 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovhpd_store(a7, XMM0)),
         ));
         // vmovlpd
         let asm = format!("vmovlpd xmm0, xmm1, {}", nasm_mem);
-        let a8 = addr.clone();
+        let a8 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.vmovlpd_load(XMM0, XMM1, a8)),

@@ -115,12 +115,12 @@ impl LabelManager {
     }
 
     /// Get the offset for a defined label.
-    pub fn get_offset(&self, label: &Label) -> Option<usize> {
+    pub fn offset(&self, label: &Label) -> Option<usize> {
         self.defs.get(&label.id).map(|d| d.offset)
     }
 
     /// Get the offset for a label by ID.
-    pub fn get_offset_by_id(&self, id: LabelId) -> Option<usize> {
+    pub fn offset_by_id(&self, id: LabelId) -> Option<usize> {
         self.defs.get(&id).map(|d| d.offset)
     }
 
@@ -260,7 +260,7 @@ mod tests {
         let mut mgr = LabelManager::new();
         let label = mgr.create_label();
         mgr.define_label(&label, 0x100).unwrap();
-        assert_eq!(mgr.get_offset(&label), Some(0x100));
+        assert_eq!(mgr.offset(&label), Some(0x100));
     }
 
     #[test]

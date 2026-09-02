@@ -118,7 +118,7 @@ fn test_reg_mapping_p2_t2() {
 #[test]
 fn test_use_rcx_maps_parameter_to_r10() {
     let mut asm = CodeAssembler::new(4096).unwrap();
-    let sf = StackFrame::new(&mut asm, 4, 0 | USE_RCX, 0).unwrap();
+    let sf = StackFrame::new(&mut asm, 4, USE_RCX, 0).unwrap();
     #[cfg(not(target_os = "windows"))]
     {
         // A reserved parameter register is represented by its dedicated
@@ -141,7 +141,7 @@ fn test_use_rcx_maps_parameter_to_r10() {
 #[test]
 fn test_use_rdx_maps_parameter_to_r11() {
     let mut asm = CodeAssembler::new(4096).unwrap();
-    let sf = StackFrame::new(&mut asm, 4, 0 | USE_RDX, 0).unwrap();
+    let sf = StackFrame::new(&mut asm, 4, USE_RDX, 0).unwrap();
     #[cfg(not(target_os = "windows"))]
     {
         assert_eq!(sf.p[0], RDI);
@@ -162,7 +162,7 @@ fn test_use_rdx_maps_parameter_to_r11() {
 #[test]
 fn test_use_rcx_rdx_together() {
     let mut asm = CodeAssembler::new(4096).unwrap();
-    let sf = StackFrame::new(&mut asm, 4, 0 | USE_RCX | USE_RDX, 0).unwrap();
+    let sf = StackFrame::new(&mut asm, 4, USE_RCX | USE_RDX, 0).unwrap();
     #[cfg(not(target_os = "windows"))]
     {
         assert_eq!(sf.p[0], RDI);
@@ -920,7 +920,7 @@ mod execution {
         asm.mov(RAX, 42i64).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn() -> i64 = unsafe { asm.get_code() };
+        let f: fn() -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(), 42);
     }
 
@@ -933,7 +933,7 @@ mod execution {
         asm.add(RAX, sf.p[1]).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(10, 32), 42);
         assert_eq!(f(100, 200), 300);
         assert_eq!(f(-5, 5), 0);
@@ -950,7 +950,7 @@ mod execution {
         asm.add(RAX, sf.p[1]).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(10, 5), 25); // 10*2 + 5 = 25
     }
 
@@ -966,7 +966,7 @@ mod execution {
         asm.add(RAX, sf.t[8]).unwrap(); // t[8] = 108
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(1), 109); // 1 + 108
     }
 
@@ -979,7 +979,7 @@ mod execution {
         asm.mov(RAX, qword_ptr(RSP.into())).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(99), 99);
     }
 
@@ -994,7 +994,7 @@ mod execution {
         asm.add(RAX, sf.p[3]).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(1, 2, 3, 4), 10);
     }
 
@@ -1009,7 +1009,7 @@ mod execution {
         asm.mov(RAX, qword_ptr(RSP.into())).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(100, 200), 300);
     }
 
@@ -1024,7 +1024,7 @@ mod execution {
         asm.add(RAX, R10).unwrap(); // R10 has original 4th param
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(10, 20, 30, 40), 50); // 10 + 40
     }
 
@@ -1040,7 +1040,7 @@ mod execution {
         asm.add(RAX, sf.p[1]).unwrap();
         sf.close(&mut asm).unwrap();
         asm.ready().unwrap();
-        let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.get_code() };
+        let f: fn(i64, i64, i64, i64) -> i64 = unsafe { asm.as_fn() };
         assert_eq!(f(10, 20, 30, 40), 30); // 10 (from R10) + 20 (from RDX)
     }
 }

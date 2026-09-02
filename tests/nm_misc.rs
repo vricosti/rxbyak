@@ -23,7 +23,7 @@ macro_rules! skip_if_no_nasm {
 fn test_nm_amx_basic() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     // tilerelease (0-operand)
     cases.push((
@@ -57,10 +57,10 @@ fn test_nm_amx_basic() {
 fn test_nm_amx_tdp() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     // tdpbssd/bsud/busd/buud/bf16ps/fp16ps — tmm, tmm, tmm
-    let tdp_ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg, Reg) -> Result<()>)] = &[
+    let tdp_ops: &[RegTernaryOp] = &[
         ("tdpbssd", CodeAssembler::tdpbssd),
         ("tdpbsud", CodeAssembler::tdpbsud),
         ("tdpbusd", CodeAssembler::tdpbusd),
@@ -93,7 +93,7 @@ fn test_nm_amx_tdp() {
 fn test_nm_amx_load_store() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     let tmms: &[(Reg, &str)] = &[(TMM0, "tmm0"), (TMM1, "tmm1"), (TMM2, "tmm2")];
 
@@ -106,9 +106,9 @@ fn test_nm_amx_load_store() {
 
     for &(tmm, tn) in tmms {
         for (expr, nasm_addr) in addrs {
-            let addr = ptr(expr.clone());
+            let addr = ptr(*expr);
             let nasm_str = format!("tileloadd {}, {}", tn, nasm_addr);
-            let addr2 = addr.clone();
+            let addr2 = addr;
             cases.push((
                 nasm_str,
                 Box::new(move |a: &mut CodeAssembler| a.tileloadd(tmm, addr2)),
@@ -118,9 +118,9 @@ fn test_nm_amx_load_store() {
 
     for &(tmm, tn) in tmms {
         for (expr, nasm_addr) in addrs {
-            let addr = ptr(expr.clone());
+            let addr = ptr(*expr);
             let nasm_str = format!("tileloaddt1 {}, {}", tn, nasm_addr);
-            let addr2 = addr.clone();
+            let addr2 = addr;
             cases.push((
                 nasm_str,
                 Box::new(move |a: &mut CodeAssembler| a.tileloaddt1(tmm, addr2)),
@@ -130,9 +130,9 @@ fn test_nm_amx_load_store() {
 
     for &(tmm, tn) in tmms {
         for (expr, nasm_addr) in addrs {
-            let addr = ptr(expr.clone());
+            let addr = ptr(*expr);
             let nasm_str = format!("tilestored {}, {}", nasm_addr, tn);
-            let addr2 = addr.clone();
+            let addr2 = addr;
             cases.push((
                 nasm_str,
                 Box::new(move |a: &mut CodeAssembler| a.tilestored(addr2, tmm)),
@@ -147,7 +147,7 @@ fn test_nm_amx_load_store() {
 fn test_nm_amx_tilecfg() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     let addrs: &[(RegExp, &str)] = &[
         (RAX.into(), "[rax]"),
@@ -156,9 +156,9 @@ fn test_nm_amx_tilecfg() {
     ];
 
     for (expr, nasm_addr) in addrs {
-        let addr = ptr(expr.clone());
+        let addr = ptr(*expr);
         let nasm_str = format!("ldtilecfg {}", nasm_addr);
-        let addr2 = addr.clone();
+        let addr2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.ldtilecfg(addr2)),
@@ -166,9 +166,9 @@ fn test_nm_amx_tilecfg() {
     }
 
     for (expr, nasm_addr) in addrs {
-        let addr = ptr(expr.clone());
+        let addr = ptr(*expr);
         let nasm_str = format!("sttilecfg {}", nasm_addr);
-        let addr2 = addr.clone();
+        let addr2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.sttilecfg(addr2)),
@@ -184,7 +184,7 @@ fn test_nm_amx_tilecfg() {
 fn test_nm_blendv() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     let xmm_pairs: &[(Reg, Reg, &str, &str)] = &[
         (XMM1, XMM2, "xmm1", "xmm2"),
@@ -217,7 +217,7 @@ fn test_nm_blendv() {
     // Also test with memory operand
     for (addr, nasm_mem) in mems128() {
         let nasm_str = format!("blendvps xmm1, {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.blendvps(XMM1, a2)),
@@ -225,7 +225,7 @@ fn test_nm_blendv() {
     }
     for (addr, nasm_mem) in mems128() {
         let nasm_str = format!("blendvpd xmm1, {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.blendvpd(XMM1, a2)),
@@ -233,7 +233,7 @@ fn test_nm_blendv() {
     }
     for (addr, nasm_mem) in mems128() {
         let nasm_str = format!("pblendvb xmm1, {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.pblendvb(XMM1, a2)),
@@ -249,7 +249,7 @@ fn test_nm_blendv() {
 fn test_nm_vcvtps2ph() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     // vcvtps2ph xmm, xmm, imm8
     let pairs: &[(Reg, Reg, &str, &str)] = &[
@@ -279,7 +279,7 @@ fn test_nm_vcvtps2ph() {
     // vcvtps2ph [mem], xmm, imm8 (NASM doesn't accept a size prefix here)
     for (addr, nasm_mem) in mems_nosizeptr() {
         let nasm_str = format!("vcvtps2ph {}, xmm3, 0x04", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.vcvtps2ph(a2, XMM3, 0x04)),
@@ -295,7 +295,7 @@ fn test_nm_vcvtps2ph() {
 fn test_nm_clflushopt() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     let addrs: &[(RegExp, &str)] = &[
         (RAX.into(), "[rax]"),
@@ -305,9 +305,9 @@ fn test_nm_clflushopt() {
     ];
 
     for (expr, nasm_addr) in addrs {
-        let addr = byte_ptr(expr.clone());
+        let addr = byte_ptr(*expr);
         let nasm_str = format!("clflushopt {}", nasm_addr);
-        let a2 = addr.clone();
+        let a2 = addr;
         cases.push((
             nasm_str,
             Box::new(move |a: &mut CodeAssembler| a.clflushopt(a2)),
@@ -323,10 +323,10 @@ fn test_nm_clflushopt() {
 fn test_nm_fpu_int_mem() {
     let nasm = skip_if_no_nasm!();
 
-    let mut cases: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut cases: InstructionBatch = Vec::new();
 
     // fiadd/fisub/fimul/fidiv with word and dword memory
-    let int_arith: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>, &str)] = &[
+    let int_arith: &[NamedAddressOp] = &[
         ("fiadd", CodeAssembler::fiadd_m16, "word"),
         ("fiadd", CodeAssembler::fiadd_m32, "dword"),
         ("fisub", CodeAssembler::fisub_m16, "word"),
@@ -346,12 +346,12 @@ fn test_nm_fpu_int_mem() {
     for &(nasm_name, method, size) in int_arith {
         for (expr, nasm_addr) in addrs {
             let addr = if size == "word" {
-                word_ptr(expr.clone())
+                word_ptr(*expr)
             } else {
-                dword_ptr(expr.clone())
+                dword_ptr(*expr)
             };
             let nasm_str = format!("{} {} {}", nasm_name, size, nasm_addr);
-            let a2 = addr.clone();
+            let a2 = addr;
             cases.push((
                 nasm_str,
                 Box::new(move |a: &mut CodeAssembler| method(a, a2)),
@@ -360,7 +360,7 @@ fn test_nm_fpu_int_mem() {
     }
 
     // ficom/ficomp with word and dword memory
-    let int_cmp: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>, &str)] = &[
+    let int_cmp: &[NamedAddressOp] = &[
         ("ficom", CodeAssembler::ficom_m16, "word"),
         ("ficom", CodeAssembler::ficom_m32, "dword"),
         ("ficomp", CodeAssembler::ficomp_m16, "word"),
@@ -370,12 +370,12 @@ fn test_nm_fpu_int_mem() {
     for &(nasm_name, method, size) in int_cmp {
         for (expr, nasm_addr) in addrs {
             let addr = if size == "word" {
-                word_ptr(expr.clone())
+                word_ptr(*expr)
             } else {
-                dword_ptr(expr.clone())
+                dword_ptr(*expr)
             };
             let nasm_str = format!("{} {} {}", nasm_name, size, nasm_addr);
-            let a2 = addr.clone();
+            let a2 = addr;
             cases.push((
                 nasm_str,
                 Box::new(move |a: &mut CodeAssembler| method(a, a2)),
@@ -384,7 +384,7 @@ fn test_nm_fpu_int_mem() {
     }
 
     // fisttp with word, dword, qword memory
-    let fisttp_ops: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>, &str)] = &[
+    let fisttp_ops: &[NamedAddressOp] = &[
         ("fisttp", CodeAssembler::fisttp_m16, "word"),
         ("fisttp", CodeAssembler::fisttp_m32, "dword"),
         ("fisttp", CodeAssembler::fisttp_m64, "qword"),
@@ -393,14 +393,14 @@ fn test_nm_fpu_int_mem() {
     for &(nasm_name, method, size) in fisttp_ops {
         for (expr, nasm_addr) in addrs {
             let addr = if size == "word" {
-                word_ptr(expr.clone())
+                word_ptr(*expr)
             } else if size == "dword" {
-                dword_ptr(expr.clone())
+                dword_ptr(*expr)
             } else {
-                qword_ptr(expr.clone())
+                qword_ptr(*expr)
             };
             let nasm_str = format!("{} {} {}", nasm_name, size, nasm_addr);
-            let a2 = addr.clone();
+            let a2 = addr;
             cases.push((
                 nasm_str,
                 Box::new(move |a: &mut CodeAssembler| method(a, a2)),

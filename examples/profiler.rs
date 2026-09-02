@@ -19,7 +19,7 @@ fn make_sub_loop() -> Result<(CodeAssembler, fn() -> i32)> {
     asm.mov(EAX, 1)?;
     asm.ret()?;
     asm.ready()?;
-    let f: fn() -> i32 = unsafe { asm.get_code() };
+    let f: fn() -> i32 = unsafe { asm.as_fn() };
     Ok((asm, f))
 }
 
@@ -37,7 +37,7 @@ fn make_xorps_loop() -> Result<(CodeAssembler, fn() -> i32)> {
     asm.mov(EAX, 1)?;
     asm.ret()?;
     asm.ready()?;
-    let f: fn() -> i32 = unsafe { asm.get_code() };
+    let f: fn() -> i32 = unsafe { asm.as_fn() };
     Ok((asm, f))
 }
 

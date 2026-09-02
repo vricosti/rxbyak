@@ -46,7 +46,7 @@ impl RegExp {
 
     /// Create a RegExp from a register with scale.
     pub fn from_reg_scale(r: Reg, scale: u8) -> Result<Self> {
-        let is_gpr = r.is_reg() && (r.get_bit() == 32 || r.get_bit() == 64);
+        let is_gpr = r.is_reg() && (r.bit_width() == 32 || r.bit_width() == 64);
         let is_simd_idx = r.is_xmm() || r.is_ymm() || r.is_zmm() || r.is_tmm();
         if !is_gpr && !is_simd_idx {
             return Err(Error::BadSizeOfRegister);
@@ -59,7 +59,7 @@ impl RegExp {
         }
 
         let mut exp = Self::default();
-        if r.get_bit() >= 128 || scale != 1 {
+        if r.bit_width() >= 128 || scale != 1 {
             // SIMD registers are always index, also scaled registers
             exp.index = r;
             exp.scale = scale;
@@ -94,21 +94,21 @@ impl RegExp {
 
     /// Whether this expression uses VSIB addressing.
     pub fn is_vsib(&self) -> bool {
-        let b = self.index.get_bit();
+        let b = self.index.bit_width();
         b == 128 || b == 256 || b == 512
     }
 
     /// Whether this expression is only a displacement (no base/index).
     pub fn is_only_disp(&self) -> bool {
-        self.base.get_bit() == 0 && self.index.get_bit() == 0
+        self.base.bit_width() == 0 && self.index.bit_width() == 0
     }
 
     /// Optimize: `[reg*2]` → `[reg + reg]`
     pub fn optimize(&self) -> Self {
         let mut exp = *self;
         let is_gpr32e =
-            exp.index.is_reg() && (exp.index.get_bit() == 32 || exp.index.get_bit() == 64);
-        if is_gpr32e && exp.base.get_bit() == 0 && exp.scale == 2 {
+            exp.index.is_reg() && (exp.index.bit_width() == 32 || exp.index.bit_width() == 64);
+        if is_gpr32e && exp.base.bit_width() == 0 && exp.scale == 2 {
             exp.base = exp.index;
             exp.scale = 1;
         }
@@ -117,15 +117,15 @@ impl RegExp {
 
     /// Validate the expression.
     pub fn verify(&self) -> Result<()> {
-        if self.base.get_bit() >= 128 {
+        if self.base.bit_width() >= 128 {
             return Err(Error::BadSizeOfRegister);
         }
-        if self.index.get_bit() > 0 && self.index.get_bit() <= 64 {
+        if self.index.bit_width() > 0 && self.index.bit_width() <= 64 {
             // ESP can't be index
-            if self.index.get_idx() == 4 && self.index.is_reg() {
+            if self.index.index() == 4 && self.index.is_reg() {
                 return Err(Error::EspCantBeIndex);
             }
-            if self.base.get_bit() > 0 && self.base.get_bit() != self.index.get_bit() {
+            if self.base.bit_width() > 0 && self.base.bit_width() != self.index.bit_width() {
                 return Err(Error::BadSizeOfRegister);
             }
         }
@@ -134,7 +134,7 @@ impl RegExp {
 
     /// Combine two RegExp expressions (a + b).
     pub fn add(a: &RegExp, b: &RegExp) -> Result<RegExp> {
-        if a.index.get_bit() > 0 && b.index.get_bit() > 0 {
+        if a.index.bit_width() > 0 && b.index.bit_width() > 0 {
             return Err(Error::BadAddressing);
         }
         if a.label_id.is_some() && b.label_id.is_some() {
@@ -151,19 +151,19 @@ impl RegExp {
         if ret.label_id.is_none() {
             ret.label_id = b.label_id;
         }
-        if ret.index.get_bit() == 0 {
+        if ret.index.bit_width() == 0 {
             ret.index = b.index;
             ret.scale = b.scale;
         }
-        if b.base.get_bit() > 0 {
-            if ret.base.get_bit() > 0 {
-                if ret.index.get_bit() > 0 {
+        if b.base.bit_width() > 0 {
+            if ret.base.bit_width() > 0 {
+                if ret.index.bit_width() > 0 {
                     return Err(Error::BadAddressing);
                 }
                 // base + base → base + index*1
                 ret.index = b.base;
                 // [reg + esp] → [esp + reg]
-                if ret.index.get_idx() == 4 && ret.index.is_reg() {
+                if ret.index.index() == 4 && ret.index.is_reg() {
                     core::mem::swap(&mut ret.base, &mut ret.index);
                 }
                 ret.scale = 1;
@@ -175,22 +175,22 @@ impl RegExp {
         Ok(ret)
     }
 
-    pub fn get_base(&self) -> &Reg {
+    pub fn base(&self) -> &Reg {
         &self.base
     }
-    pub fn get_index(&self) -> &Reg {
+    pub fn index(&self) -> &Reg {
         &self.index
     }
-    pub fn get_scale(&self) -> u8 {
+    pub fn scale(&self) -> u8 {
         self.scale
     }
-    pub fn get_disp(&self) -> i64 {
+    pub fn displacement(&self) -> i64 {
         self.disp
     }
     pub fn is_rip(&self) -> bool {
         self.rip
     }
-    pub fn get_label_id(&self) -> Option<LabelId> {
+    pub fn label_id(&self) -> Option<LabelId> {
         self.label_id
     }
 }
@@ -350,7 +350,7 @@ impl Address {
     }
 
     /// Get the (potentially optimized) RegExp.
-    pub fn get_reg_exp(&self) -> RegExp {
+    pub fn register_expression(&self) -> RegExp {
         if self.optimize {
             self.exp.optimize()
         } else {
@@ -365,16 +365,16 @@ impl Address {
         addr
     }
 
-    pub fn get_mode(&self) -> AddressMode {
+    pub fn mode(&self) -> AddressMode {
         self.mode
     }
-    pub fn get_bit(&self) -> u16 {
+    pub fn bit_width(&self) -> u16 {
         self.bit
     }
     pub fn is_broadcast(&self) -> bool {
         self.broadcast
     }
-    pub fn get_opmask_idx(&self) -> u8 {
+    pub fn opmask_index(&self) -> u8 {
         self.mask
     }
     pub fn has_zero(&self) -> bool {
@@ -386,18 +386,18 @@ impl Address {
     pub fn is_only_disp(&self) -> bool {
         self.exp.is_only_disp()
     }
-    pub fn get_disp(&self) -> i64 {
+    pub fn displacement(&self) -> i64 {
         self.exp.disp
     }
     pub fn is_64bit_disp(&self) -> bool {
         self.mode == AddressMode::Disp64
     }
-    pub fn get_label_id(&self) -> Option<LabelId> {
+    pub fn label_id(&self) -> Option<LabelId> {
         self.label_id
     }
 
     pub fn is_32bit(&self) -> bool {
-        self.exp.base.get_bit() == 32 || self.exp.index.get_bit() == 32
+        self.exp.base.bit_width() == 32 || self.exp.index.bit_width() == 32
     }
 
     pub fn has_rex2(&self) -> bool {
@@ -485,7 +485,7 @@ pub fn broadcast_ptr(bit: u16, exp: RegExp) -> Address {
 /// Helpers to create RegExp from a single register (for use in ptr functions).
 impl From<Reg> for RegExp {
     fn from(r: Reg) -> Self {
-        if r.get_bit() == 0 {
+        if r.bit_width() == 0 {
             return Self::default();
         }
         RegExp::from_reg(r).expect("bad register for address")
@@ -500,43 +500,43 @@ mod tests {
     #[test]
     fn test_simple_reg_addr() {
         let addr = ptr(RAX.into());
-        let exp = addr.get_reg_exp();
-        assert_eq!(exp.get_base().get_idx(), 0);
-        assert_eq!(exp.get_base().get_bit(), 64);
-        assert_eq!(exp.get_disp(), 0);
+        let exp = addr.register_expression();
+        assert_eq!(exp.base().index(), 0);
+        assert_eq!(exp.base().bit_width(), 64);
+        assert_eq!(exp.displacement(), 0);
     }
 
     #[test]
     fn test_reg_plus_disp() {
         let exp = RAX + 0x10;
         let addr = dword_ptr(exp);
-        assert_eq!(addr.get_bit(), 32);
-        assert_eq!(addr.get_reg_exp().get_disp(), 0x10);
+        assert_eq!(addr.bit_width(), 32);
+        assert_eq!(addr.register_expression().displacement(), 0x10);
     }
 
     #[test]
     fn test_reg_plus_reg() {
         let exp = RAX + RCX;
-        assert_eq!(exp.get_base().get_idx(), 0); // rax
-        assert_eq!(exp.get_index().get_idx(), 1); // rcx
-        assert_eq!(exp.get_scale(), 1);
+        assert_eq!(exp.base().index(), 0); // rax
+        assert_eq!(exp.index().index(), 1); // rcx
+        assert_eq!(exp.scale(), 1);
     }
 
     #[test]
     fn test_base_plus_index_scaled() {
         let exp = RBX + RSI * 4;
-        assert_eq!(exp.get_base().get_idx(), 3); // rbx
-        assert_eq!(exp.get_index().get_idx(), 6); // rsi
-        assert_eq!(exp.get_scale(), 4);
+        assert_eq!(exp.base().index(), 3); // rbx
+        assert_eq!(exp.index().index(), 6); // rsi
+        assert_eq!(exp.scale(), 4);
     }
 
     #[test]
     fn test_full_sib() {
         let exp = RBP + RDI * 8 + 0x100;
-        assert_eq!(exp.get_base().get_idx(), 5); // rbp
-        assert_eq!(exp.get_index().get_idx(), 7); // rdi
-        assert_eq!(exp.get_scale(), 8);
-        assert_eq!(exp.get_disp(), 0x100);
+        assert_eq!(exp.base().index(), 5); // rbp
+        assert_eq!(exp.index().index(), 7); // rdi
+        assert_eq!(exp.scale(), 8);
+        assert_eq!(exp.displacement(), 0x100);
     }
 
     #[test]
@@ -544,25 +544,25 @@ mod tests {
         // [rcx*2] → [rcx + rcx*1]
         let exp = RCX * 2;
         let opt = exp.optimize();
-        assert_eq!(opt.get_base().get_idx(), 1);
-        assert_eq!(opt.get_index().get_idx(), 1);
-        assert_eq!(opt.get_scale(), 1);
+        assert_eq!(opt.base().index(), 1);
+        assert_eq!(opt.index().index(), 1);
+        assert_eq!(opt.scale(), 1);
     }
 
     #[test]
     fn test_null_rip_address_is_plain_displacement() {
         let addr = ptr(RegExp::rip_addr(0));
-        assert_eq!(addr.get_mode(), AddressMode::Rip);
-        assert_eq!(addr.get_disp(), 0);
+        assert_eq!(addr.mode(), AddressMode::Rip);
+        assert_eq!(addr.displacement(), 0);
     }
 
     #[test]
     fn test_address_change_bit_preserves_expression() {
         let byte = byte_ptr(RAX + 16);
         let dword = byte.change_bit(32);
-        assert_eq!(byte.get_bit(), 8);
-        assert_eq!(dword.get_bit(), 32);
-        assert_eq!(dword.get_reg_exp().get_base(), &RAX);
-        assert_eq!(dword.get_disp(), 16);
+        assert_eq!(byte.bit_width(), 8);
+        assert_eq!(dword.bit_width(), 32);
+        assert_eq!(dword.register_expression().base(), &RAX);
+        assert_eq!(dword.displacement(), 16);
     }
 }

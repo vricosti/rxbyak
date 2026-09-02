@@ -6,6 +6,9 @@ use std::time::Instant;
 
 const N: usize = 64;
 
+type QuantizeFunction = fn(*mut u32, *const u32);
+type CompiledQuantizeFunction = (CodeAssembler, QuantizeFunction);
+
 fn ilog2(x: u32) -> u32 {
     let mut shift = 0;
     while (1u64 << shift) <= x as u64 {
@@ -16,14 +19,13 @@ fn ilog2(x: u32) -> u32 {
 
 /// Generate JIT quantization function for given quantization table.
 /// fn(dest: *mut u32, src: *const u32)
-fn make_quantize(q_tbl: &[u32; N]) -> Result<(CodeAssembler, fn(*mut u32, *const u32))> {
+fn make_quantize(q_tbl: &[u32; N]) -> Result<CompiledQuantizeFunction> {
     let mut asm = CodeAssembler::new(65536)?;
 
     // System V ABI: RDI = dest, RSI = src
     // We use StackFrame-like approach but manually to match original closely
 
-    for i in 0..N {
-        let dividend = q_tbl[i];
+    for (i, &dividend) in q_tbl.iter().enumerate() {
         let offset = (i * 4) as i32;
 
         // Load src[i] into EAX
@@ -102,7 +104,7 @@ fn make_quantize(q_tbl: &[u32; N]) -> Result<(CodeAssembler, fn(*mut u32, *const
 
     asm.ret()?;
     asm.ready()?;
-    let f: fn(*mut u32, *const u32) = unsafe { asm.get_code() };
+    let f: fn(*mut u32, *const u32) = unsafe { asm.as_fn() };
     Ok((asm, f))
 }
 
