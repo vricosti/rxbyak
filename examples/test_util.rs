@@ -103,7 +103,7 @@ fn main() -> Result<()> {
         asm.ret()?;
         asm.set_protect_mode_re()?;
 
-        let f: fn() -> i32 = unsafe { asm.get_code() };
+        let f: fn() -> i32 = unsafe { asm.as_fn() };
         let r = f();
         if r == expected {
             println!("popcnt ok");

@@ -1,3 +1,5 @@
+#![allow(clippy::vec_init_then_push)]
+
 /// x87 FPU instruction NASM conformance tests.
 mod common;
 
@@ -55,7 +57,7 @@ fn test_nm_fpu_load_store() {
     // fst m32, fstp m32
     for (addr, nasm_mem) in mems32() {
         let asm = format!("fst {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fst_m32(a2))));
         let asm = format!("fstp {}", nasm_mem);
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fstp_m32(addr))));
@@ -63,7 +65,7 @@ fn test_nm_fpu_load_store() {
     // fst m64, fstp m64
     for (addr, nasm_mem) in mems64() {
         let asm = format!("fst {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fst_m64(a2))));
         let asm = format!("fstp {}", nasm_mem);
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fstp_m64(addr))));
@@ -80,7 +82,7 @@ fn test_nm_fpu_load_store() {
     // fist m32, fistp m32
     for (addr, nasm_mem) in mems32() {
         let asm = format!("fist {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fist_m32(a2))));
         let asm = format!("fistp {}", nasm_mem);
         insns.push((
@@ -357,7 +359,7 @@ fn test_nm_fpu_control() {
     // fldcw / fnstcw [mem]
     for (addr, nasm_mem) in mems16() {
         let asm = format!("fldcw {}", nasm_mem);
-        let a2 = addr.clone();
+        let a2 = addr;
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fldcw(a2))));
         let asm = format!("fnstcw {}", nasm_mem);
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.fnstcw(addr))));
@@ -381,7 +383,7 @@ fn test_nm_fpu_cmov() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg) -> Result<()>)] = &[
+    let ops: &[RegUnaryOp] = &[
         ("fcmovb", |a, s| a.fcmovb(s)),
         ("fcmove", |a, s| a.fcmove(s)),
         ("fcmovbe", |a, s| a.fcmovbe(s)),

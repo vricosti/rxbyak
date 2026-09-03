@@ -143,7 +143,7 @@ fn main() -> Result<()> {
             }
 
             asm.ready()?;
-            let f: fn(i64) -> i64 = unsafe { asm.get_code() };
+            let f: fn(i64) -> i64 = unsafe { asm.as_fn() };
 
             for i in 0..3 {
                 let a = EXPECT_TBL[i as usize];

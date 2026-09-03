@@ -22,7 +22,7 @@ macro_rules! skip_if_no_nasm {
 #[test]
 fn test_nasm_mov_reg32_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(dst, dst_name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &(src, src_name) in REGS32.iter().chain(REGS32_EXT.iter()) {
             let asm_text = format!("mov {}, {}", dst_name, src_name);
@@ -40,7 +40,7 @@ fn test_nasm_mov_reg32_reg32() {
 #[test]
 fn test_nasm_mov_reg64_reg64() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(dst, dst_name) in REGS64.iter().chain(REGS64_EXT.iter()) {
         for &(src, src_name) in REGS64.iter().chain(REGS64_EXT.iter()) {
             let asm_text = format!("mov {}, {}", dst_name, src_name);
@@ -58,7 +58,7 @@ fn test_nasm_mov_reg64_reg64() {
 #[test]
 fn test_nasm_mov_reg32_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[0, 1, 42, 0x7F, 0x80, 0xFF, 0x100, 0x12345678];
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &imm in imm_values {
@@ -75,7 +75,7 @@ fn test_nasm_mov_reg32_imm() {
 #[test]
 fn test_nasm_mov_reg8_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[0, 1, 0x7F, 0xFF];
     for &(reg, name) in REGS8.iter() {
         for &imm in imm_values {
@@ -96,8 +96,7 @@ macro_rules! test_alu_reg_reg {
         #[test]
         fn $test_name() {
             let nasm = skip_if_no_nasm!();
-            let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> =
-                Vec::new();
+            let mut insns: InstructionBatch = Vec::new();
             for &(dst, dst_name) in $regs {
                 for &(src, src_name) in $regs {
                     let asm_text = format!("{} {}, {}", $mnemonic, dst_name, src_name);
@@ -253,7 +252,7 @@ test_alu_reg_reg!(
 #[test]
 fn test_nasm_add_reg32_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[1, 0x7F, 0x80, 0x12345678];
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &imm in imm_values {
@@ -270,7 +269,7 @@ fn test_nasm_add_reg32_imm() {
 #[test]
 fn test_nasm_sub_reg64_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[1, 0x7F, 0x80, 0x12345678];
     for &(reg, name) in REGS64.iter().chain(REGS64_EXT.iter()) {
         for &imm in imm_values {
@@ -287,7 +286,7 @@ fn test_nasm_sub_reg64_imm() {
 #[test]
 fn test_nasm_cmp_reg32_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[0, 1, 0x7F, 0x80, 0xFF, 0x12345678];
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &imm in imm_values {
@@ -304,7 +303,7 @@ fn test_nasm_cmp_reg32_imm() {
 #[test]
 fn test_nasm_and_reg64_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[1, 0x7F, 0xFF, 0x12345678];
     for &(reg, name) in REGS64.iter().chain(REGS64_EXT.iter()) {
         for &imm in imm_values {
@@ -323,7 +322,7 @@ fn test_nasm_and_reg64_imm() {
 #[test]
 fn test_nasm_shl_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let shift_values: &[u8] = &[1, 2, 4, 7, 16, 31];
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &imm in shift_values {
@@ -340,7 +339,7 @@ fn test_nasm_shl_reg32() {
 #[test]
 fn test_nasm_shr_reg64() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let shift_values: &[u8] = &[1, 2, 4, 8, 32, 63];
     for &(reg, name) in REGS64.iter().chain(REGS64_EXT.iter()) {
         for &imm in shift_values {
@@ -357,7 +356,7 @@ fn test_nasm_shr_reg64() {
 #[test]
 fn test_nasm_sar_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let shift_values: &[u8] = &[1, 4, 7, 31];
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &imm in shift_values {
@@ -376,7 +375,7 @@ fn test_nasm_sar_reg32() {
 #[test]
 fn test_nasm_inc_reg() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         let asm_text = format!("inc {}", name);
         insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.inc(reg))));
@@ -391,7 +390,7 @@ fn test_nasm_inc_reg() {
 #[test]
 fn test_nasm_dec_reg() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         let asm_text = format!("dec {}", name);
         insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.dec(reg))));
@@ -406,7 +405,7 @@ fn test_nasm_dec_reg() {
 #[test]
 fn test_nasm_neg_reg() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         let asm_text = format!("neg {}", name);
         insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.neg(reg))));
@@ -421,7 +420,7 @@ fn test_nasm_neg_reg() {
 #[test]
 fn test_nasm_not_reg() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         let asm_text = format!("not {}", name);
         insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.not_(reg))));
@@ -438,7 +437,7 @@ fn test_nasm_not_reg() {
 #[test]
 fn test_nasm_push_pop_reg64() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(reg, name) in REGS64.iter().chain(REGS64_EXT.iter()) {
         let asm_text = format!("push {}", name);
         insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.push(reg))));
@@ -453,7 +452,7 @@ fn test_nasm_push_pop_reg64() {
 #[test]
 fn test_nasm_push_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[0, 1, 42, 0x7F, 0x80, 0x12345678];
     for &imm in imm_values {
         let asm_text = format!("push 0x{:x}", imm);
@@ -470,7 +469,7 @@ fn test_nasm_push_imm() {
 #[test]
 fn test_nasm_test_reg32_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let regs: &[(Reg, &str)] = &[
         (EAX, "eax"),
         (ECX, "ecx"),
@@ -494,7 +493,7 @@ fn test_nasm_test_reg32_reg32() {
 #[test]
 fn test_nasm_test_reg32_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let imm_values: &[i32] = &[0xFF, 0x12345678];
     for &(reg, name) in REGS32.iter().chain(REGS32_EXT.iter()) {
         for &imm in imm_values {
@@ -513,7 +512,7 @@ fn test_nasm_test_reg32_imm() {
 #[test]
 fn test_nasm_xchg_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let regs: &[(Reg, &str)] = &[
         (EAX, "eax"),
         (ECX, "ecx"),
@@ -524,7 +523,7 @@ fn test_nasm_xchg_reg32() {
     ];
     for &(dst, dst_name) in regs {
         for &(src, src_name) in regs {
-            if dst.get_idx() == src.get_idx() {
+            if dst.index() == src.index() {
                 continue; // xchg reg, same_reg has special encoding
             }
             let asm_text = format!("xchg {}, {}", dst_name, src_name);
@@ -540,7 +539,7 @@ fn test_nasm_xchg_reg32() {
 #[test]
 fn test_nasm_xchg_reg64() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let regs: &[(Reg, &str)] = &[
         (RAX, "rax"),
         (RCX, "rcx"),
@@ -550,7 +549,7 @@ fn test_nasm_xchg_reg64() {
     ];
     for &(dst, dst_name) in regs {
         for &(src, src_name) in regs {
-            if dst.get_idx() == src.get_idx() {
+            if dst.index() == src.index() {
                 continue;
             }
             let asm_text = format!("xchg {}, {}", dst_name, src_name);
@@ -568,7 +567,7 @@ fn test_nasm_xchg_reg64() {
 #[test]
 fn test_nasm_movzx_reg32_reg8() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let dst_regs: &[(Reg, &str)] = &[
         (EAX, "eax"),
         (ECX, "ecx"),
@@ -600,7 +599,7 @@ fn test_nasm_movzx_reg32_reg8() {
 #[test]
 fn test_nasm_movzx_reg32_reg16() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let dst_regs: &[(Reg, &str)] = &[(EAX, "eax"), (ECX, "ecx"), (EDX, "edx"), (R8D, "r8d")];
     let src_regs: &[(Reg, &str)] = &[(AX, "ax"), (CX, "cx"), (DX, "dx"), (R8W, "r8w")];
     for &(dst, dst_name) in dst_regs {
@@ -618,7 +617,7 @@ fn test_nasm_movzx_reg32_reg16() {
 #[test]
 fn test_nasm_movzx_reg64_reg8() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let dst_regs: &[(Reg, &str)] = &[(RAX, "rax"), (RCX, "rcx"), (R8, "r8")];
     let src_regs: &[(Reg, &str)] = &[(AL, "al"), (CL, "cl"), (R8B, "r8b")];
     for &(dst, dst_name) in dst_regs {
@@ -636,7 +635,7 @@ fn test_nasm_movzx_reg64_reg8() {
 #[test]
 fn test_nasm_movsx_reg32_reg8() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let dst_regs: &[(Reg, &str)] = &[
         (EAX, "eax"),
         (ECX, "ecx"),
@@ -666,7 +665,7 @@ fn test_nasm_movsx_reg32_reg8() {
 #[test]
 fn test_nasm_movsxd_reg64_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let dst_regs: &[(Reg, &str)] = &[(RAX, "rax"), (RCX, "rcx"), (R8, "r8"), (R9, "r9")];
     let src_regs: &[(Reg, &str)] = &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d"), (R9D, "r9d")];
     for &(dst, dst_name) in dst_regs {
@@ -686,7 +685,7 @@ fn test_nasm_movsxd_reg64_reg32() {
 #[test]
 fn test_nasm_imul_reg32_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let regs: &[(Reg, &str)] = &[
         (EAX, "eax"),
         (ECX, "ecx"),
@@ -710,7 +709,7 @@ fn test_nasm_imul_reg32_reg32() {
 #[test]
 fn test_nasm_imul_reg64_reg64() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let regs: &[(Reg, &str)] = &[
         (RAX, "rax"),
         (RCX, "rcx"),
@@ -735,7 +734,7 @@ fn test_nasm_imul_reg64_reg64() {
 #[test]
 fn test_nasm_lea_variants() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // lea reg, [base + disp]
     let bases: &[(Reg, &str)] = &[
@@ -782,7 +781,7 @@ fn test_nasm_lea_variants() {
 #[test]
 fn test_nasm_mov_reg_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let regs: &[(Reg, &str)] = &[(EAX, "eax"), (ECX, "ecx"), (EDX, "edx"), (R8D, "r8d")];
     let bases: &[(Reg, &str)] = &[
@@ -835,7 +834,7 @@ fn test_nasm_mov_reg_mem() {
 #[test]
 fn test_nasm_mov_reg64_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let regs: &[(Reg, &str)] = &[(RAX, "rax"), (RCX, "rcx"), (R8, "r8")];
     let bases: &[(Reg, &str)] = &[
@@ -876,7 +875,7 @@ fn test_nasm_mov_reg64_mem() {
 #[test]
 fn test_nasm_zero_operand() {
     let nasm = skip_if_no_nasm!();
-    let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
+    let insns: InstructionBatch = vec![
         ("nop".into(), Box::new(|a: &mut CodeAssembler| a.nop())),
         ("ret".into(), Box::new(|a: &mut CodeAssembler| a.ret())),
         ("int3".into(), Box::new(|a: &mut CodeAssembler| a.int3())),
@@ -891,7 +890,7 @@ fn test_nasm_zero_operand() {
 #[test]
 fn test_nasm_adc_sbb_reg32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     let regs: &[(Reg, &str)] = &[
         (EAX, "eax"),
         (ECX, "ecx"),
@@ -925,7 +924,7 @@ fn test_nasm_adc_sbb_reg32() {
 #[test]
 fn test_nasm_push_pop_reg16() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
     for &(reg, name) in REGS16.iter() {
         let asm_text = format!("push {}", name);
         insns.push((asm_text, Box::new(move |a: &mut CodeAssembler| a.push(reg))));
@@ -942,7 +941,7 @@ fn test_nasm_push_pop_reg16() {
 #[test]
 fn test_nasm_mov_indexed_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // mov eax, [base + index*scale + disp]
     let combos: &[(Reg, &str, Reg, &str, u8, i32)] = &[
@@ -976,7 +975,7 @@ fn test_nasm_mov_indexed_mem() {
 #[test]
 fn test_nasm_ret_imm() {
     let nasm = skip_if_no_nasm!();
-    let insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = vec![
+    let insns: InstructionBatch = vec![
         (
             "ret 8".into(),
             Box::new(|a: &mut CodeAssembler| a.ret_imm(8)),
@@ -998,7 +997,7 @@ fn test_nasm_ret_imm() {
 #[test]
 fn test_nasm_or_and_xor_imm() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let regs: &[(Reg, &str)] = &[(EAX, "eax"), (ECX, "ecx"), (R8D, "r8d")];
     let imm_values: &[i32] = &[1, 0x7F, 0xFF, 0x12345678];
@@ -1030,7 +1029,7 @@ fn test_nasm_or_and_xor_imm() {
 #[test]
 fn test_nasm_add_sub_mem() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // add reg, [mem]
     let combos: &[(Reg, &str, Reg, &str)] = &[

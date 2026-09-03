@@ -17,7 +17,7 @@ extern "C" fn bf_getchar() -> i32 {
     }
 }
 
-fn get_continuous_char(src: &[u8], pos: &mut usize, c: u8) -> i32 {
+fn continuous_char_count(src: &[u8], pos: &mut usize, c: u8) -> i32 {
     let mut count = 1;
     while *pos + 1 < src.len() && src[*pos + 1] == c {
         *pos += 1;
@@ -53,7 +53,7 @@ fn compile_bf(src: &[u8]) -> Result<CodeAssembler> {
         let c = src[pos];
         match c {
             b'+' | b'-' => {
-                let count = get_continuous_char(src, &mut pos, c);
+                let count = continuous_char_count(src, &mut pos, c);
                 if count == 1 {
                     if c == b'+' {
                         asm.inc(byte_ptr(stack.into()))?;
@@ -66,7 +66,7 @@ fn compile_bf(src: &[u8]) -> Result<CodeAssembler> {
                 }
             }
             b'>' | b'<' => {
-                let count = get_continuous_char(src, &mut pos, c) as i64;
+                let count = continuous_char_count(src, &mut pos, c) as i64;
                 let val = if c == b'>' { count } else { -count };
                 asm.add(stack, val)?;
             }
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
     let asm = compile_bf(&src)?;
 
     type BfFunc = fn(usize, usize, *mut u8);
-    let f: BfFunc = unsafe { asm.get_code() };
+    let f: BfFunc = unsafe { asm.as_fn() };
 
     let mut stack = vec![0u8; 128 * 1024];
     f(bf_putchar as usize, bf_getchar as usize, stack.as_mut_ptr());

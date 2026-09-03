@@ -22,7 +22,7 @@ macro_rules! skip_if_no_nasm {
 #[test]
 fn test_nasm_addr_base_only() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     for &(base, base_name) in BASES64.iter() {
         let asm_text = format!("mov ecx, dword [{}]", base_name);
@@ -40,7 +40,7 @@ fn test_nasm_addr_base_only() {
 #[test]
 fn test_nasm_addr_base_disp8() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     for &(base, base_name) in BASES64.iter() {
         let asm_text = format!("mov ecx, dword [{}+0x1]", base_name);
@@ -58,7 +58,7 @@ fn test_nasm_addr_base_disp8() {
 #[test]
 fn test_nasm_addr_base_disp32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     for &(base, base_name) in BASES64.iter() {
         let asm_text = format!("mov ecx, dword [{}+0x12345678]", base_name);
@@ -76,7 +76,7 @@ fn test_nasm_addr_base_disp32() {
 #[test]
 fn test_nasm_addr_base_disp_boundaries() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let disps: &[(i32, &str)] = &[
         (0x7F, "0x7f"), // max disp8
@@ -109,7 +109,7 @@ fn test_nasm_addr_base_disp_boundaries() {
 #[test]
 fn test_nasm_addr_base_index_scale() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // Test representative base+index combos with all scales
     let combos: &[(Reg, &str, Reg, &str)] = &[
@@ -142,7 +142,7 @@ fn test_nasm_addr_base_index_scale() {
 #[test]
 fn test_nasm_addr_base_index_scale_disp8() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let combos: &[(Reg, &str, Reg, &str)] = &[
         (RAX, "rax", RCX, "rcx"),
@@ -173,7 +173,7 @@ fn test_nasm_addr_base_index_scale_disp8() {
 #[test]
 fn test_nasm_addr_base_index_scale_disp32() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     let combos: &[(Reg, &str, Reg, &str)] = &[
         (RAX, "rax", RCX, "rcx"),
@@ -206,7 +206,7 @@ fn test_nasm_addr_base_index_scale_disp32() {
 #[test]
 fn test_nasm_addr_rbp_r13_special() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // RBP as base: [rbp] requires disp8=0, [rbp+disp8], [rbp+disp32]
     for &(disp, disp_str) in &[(0, ""), (1, "+0x1"), (0x80, "+0x80")] {
@@ -251,7 +251,7 @@ fn test_nasm_addr_rbp_r13_special() {
 #[test]
 fn test_nasm_addr_rsp_r12_special() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // RSP as base: always needs SIB byte
     for &(disp, disp_str) in &[(0, ""), (1, "+0x1"), (0x80, "+0x80")] {
@@ -296,7 +296,7 @@ fn test_nasm_addr_rsp_r12_special() {
 #[test]
 fn test_nasm_addr_64bit_ops() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // mov rax, qword [base + disp]
     for &(base, base_name) in &[
@@ -338,7 +338,7 @@ fn test_nasm_addr_64bit_ops() {
 #[test]
 fn test_nasm_addr_data_sizes() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // byte, word, dword, qword from [rax+0x10]
     let asm_text = "mov al, byte [rax+0x10]".to_string();
@@ -398,7 +398,7 @@ fn test_nasm_addr_data_sizes() {
 #[test]
 fn test_nasm_addr_all_index_regs() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // Use all valid index registers (all except RSP)
     for &(idx, idx_name) in INDICES64.iter() {
@@ -417,7 +417,7 @@ fn test_nasm_addr_all_index_regs() {
 #[test]
 fn test_nasm_addr_simd() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // movaps xmm, [base]
     for &(base, base_name) in &[(RAX, "rax"), (RSP, "rsp"), (RBP, "rbp"), (R8, "r8")] {
@@ -456,7 +456,7 @@ fn test_nasm_addr_simd() {
 #[test]
 fn test_nasm_addr_alu_combos() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     // add eax, [base + index*scale + disp]
     let combos: &[(Reg, &str, Reg, &str, u8, i32)] = &[
@@ -496,7 +496,7 @@ fn test_nasm_addr_alu_combos() {
 #[test]
 fn test_nasm_addr_negative_disp() {
     let nasm = skip_if_no_nasm!();
-    let mut insns: Vec<(String, Box<dyn FnOnce(&mut CodeAssembler) -> Result<()>>)> = Vec::new();
+    let mut insns: InstructionBatch = Vec::new();
 
     for &(base, base_name) in &[(RAX, "rax"), (RBP, "rbp"), (RSP, "rsp"), (R8, "r8")] {
         let asm_text = format!("mov ecx, dword [{}-0x8]", base_name);

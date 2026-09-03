@@ -858,6 +858,6 @@ fn test_jit_execution() {
     asm.ret().unwrap();
     asm.ready().unwrap();
 
-    let f: extern "C" fn() -> i32 = unsafe { asm.get_code() };
+    let f: extern "C" fn() -> i32 = unsafe { asm.as_fn() };
     assert_eq!(f(), 42);
 }

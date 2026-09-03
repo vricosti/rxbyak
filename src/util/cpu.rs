@@ -40,10 +40,10 @@ impl CpuType {
     pub fn is_empty(self) -> bool {
         self.lo == 0 && self.hi == 0
     }
-    pub const fn get_l(self) -> u64 {
+    pub const fn low(self) -> u64 {
         self.lo
     }
-    pub const fn get_h(self) -> u64 {
+    pub const fn high(self) -> u64 {
         self.hi
     }
 }
@@ -273,7 +273,7 @@ impl Cpu {
 
     /// Get number of logical processors per topology level.
     /// `SmtLevel` (1) returns threads per core, `CoreLevel` (2) returns cores per package.
-    pub fn get_num_cores(&self, level: u32) -> Result<u32> {
+    pub fn core_count_at_level(&self, level: u32) -> Result<u32> {
         match level {
             1 => Ok(self.num_cores[0]), // SmtLevel
             2 => {
@@ -336,7 +336,7 @@ impl Cpu {
         );
     }
 
-    pub fn get_cpuid_ex(eax: u32, ecx: u32) -> [u32; 4] {
+    pub fn cpuid_with_subleaf(eax: u32, ecx: u32) -> [u32; 4] {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             let value = unsafe { __cpuid_count(eax, ecx) };
@@ -349,11 +349,11 @@ impl Cpu {
         }
     }
 
-    pub fn get_cpuid(eax: u32) -> [u32; 4] {
-        Self::get_cpuid_ex(eax, 0)
+    pub fn cpuid(eax: u32) -> [u32; 4] {
+        Self::cpuid_with_subleaf(eax, 0)
     }
 
-    pub fn get_xfeature() -> u64 {
+    pub fn xcr0() -> u64 {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             unsafe { _xgetbv(0) }
@@ -937,8 +937,8 @@ mod tests {
         assert!(!a.contains(b));
         ab &= a;
         assert_eq!(ab, a);
-        assert_eq!(ab.get_l(), 1);
-        assert_eq!(ab.get_h(), 0);
+        assert_eq!(ab.low(), 1);
+        assert_eq!(ab.high(), 0);
     }
 
     #[test]
@@ -953,23 +953,23 @@ mod tests {
 
     #[test]
     fn test_cpu_feature_ids() {
-        assert_eq!(MMX.get_l(), 1 << 0);
-        assert_eq!(AVX.get_l(), 1 << 14);
-        assert_eq!(AVX512F.get_l(), 1 << 35);
-        assert_eq!(CLFLUSHOPT.get_l(), 1 << 63);
-        assert_eq!(CLDEMOTE.get_h(), 1 << 0);
-        assert_eq!(HYBRID.get_h(), 1 << (97 - 64));
-        assert_eq!(AMX_COMPLEX.get_h(), 1 << (98 - 64));
-        assert_eq!(ACE.get_h(), 1 << (99 - 64));
-        assert_eq!(AVX10_V1_AUX.get_h(), 1 << (100 - 64));
-        assert_eq!(AVX10_V2_AUX.get_h(), 1 << (101 - 64));
+        assert_eq!(MMX.low(), 1 << 0);
+        assert_eq!(AVX.low(), 1 << 14);
+        assert_eq!(AVX512F.low(), 1 << 35);
+        assert_eq!(CLFLUSHOPT.low(), 1 << 63);
+        assert_eq!(CLDEMOTE.high(), 1 << 0);
+        assert_eq!(HYBRID.high(), 1 << (97 - 64));
+        assert_eq!(AMX_COMPLEX.high(), 1 << (98 - 64));
+        assert_eq!(ACE.high(), 1 << (99 - 64));
+        assert_eq!(AVX10_V1_AUX.high(), 1 << (100 - 64));
+        assert_eq!(AVX10_V2_AUX.high(), 1 << (101 - 64));
     }
 
     #[test]
     fn test_cpu_query_errors_match_upstream() {
         let cpu = Cpu::new();
         assert_eq!(
-            cpu.get_num_cores(0).unwrap_err(),
+            cpu.core_count_at_level(0).unwrap_err(),
             Error::X2apicIsNotSupported
         );
         assert_eq!(
@@ -986,8 +986,8 @@ mod tests {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn test_public_cpuid_helpers() {
-        let leaf = Cpu::get_cpuid(0);
-        let leaf_ex = Cpu::get_cpuid_ex(0, 0);
+        let leaf = Cpu::cpuid(0);
+        let leaf_ex = Cpu::cpuid_with_subleaf(0, 0);
         assert_eq!(leaf, leaf_ex);
         assert_ne!(leaf[0], 0);
     }

@@ -9,8 +9,8 @@ fn assemble(f: impl FnOnce(&mut CodeAssembler) -> Result<()>) -> Vec<u8> {
 #[test]
 fn test_bsr_register_matches_xbyak_7_40() {
     assert!(BSR0.is_bsr());
-    assert_eq!(BSR0.get_idx(), 0);
-    assert_eq!(BSR0.get_bit(), 1024);
+    assert_eq!(BSR0.index(), 0);
+    assert_eq!(BSR0.bit_width(), 1024);
 }
 
 #[test]

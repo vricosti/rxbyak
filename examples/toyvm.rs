@@ -84,7 +84,7 @@ impl ToyVm {
     fn set_mark(&mut self) {
         self.mark = self.code.len() as i32;
     }
-    fn get_mark_offset(&self) -> i16 {
+    fn mark_offset(&self) -> i16 {
         (self.mark - self.code.len() as i32 - 1) as i16
     }
 
@@ -258,7 +258,7 @@ impl ToyVm {
         asm.ret()?;
         asm.ready()?;
 
-        let f: fn() = unsafe { asm.get_code() };
+        let f: fn() = unsafe { asm.as_fn() };
         Ok((asm, f))
     }
 }
@@ -303,7 +303,7 @@ fn main() -> Result<()> {
     fib.vld(VmReg::B, 2);
     fib.vsubi(VmReg::B, 1);
     fib.vst(VmReg::B, 2); // n--
-    fib.vjnz(VmReg::B, fib.get_mark_offset());
+    fib.vjnz(VmReg::B, fib.mark_offset());
     fib.vput(VmReg::A);
 
     // Interpreter

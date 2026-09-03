@@ -3,6 +3,9 @@
 
 use rxbyak::*;
 
+type AddFunction = fn(i32) -> i32;
+type CompiledAddFunction = (CodeAssembler, AddFunction);
+
 /// Generate: fn(n: i32) -> i32 that returns 0 + 1 + ... + n
 fn make_sum(asm: &mut CodeAssembler) -> Result<()> {
     asm.enter_local();
@@ -26,13 +29,13 @@ fn make_sum(asm: &mut CodeAssembler) -> Result<()> {
 }
 
 /// Generate: fn(x: i32) -> i32 that returns x + y (where y is baked in)
-fn make_add_func(y: i32) -> Result<(CodeAssembler, fn(i32) -> i32)> {
+fn make_add_func(y: i32) -> Result<CompiledAddFunction> {
     let mut asm = CodeAssembler::new(4096)?;
     // System V: edi = x
     asm.lea(EAX, ptr(RDI + y))?;
     asm.ret()?;
     asm.ready()?;
-    let f: fn(i32) -> i32 = unsafe { asm.get_code() };
+    let f: AddFunction = unsafe { asm.as_fn() };
     Ok((asm, f))
 }
 
@@ -43,7 +46,7 @@ fn main() -> Result<()> {
     let mut asm = CodeAssembler::new(4096)?;
     make_sum(&mut asm)?;
     asm.ready()?;
-    let func: fn(i32) -> i32 = unsafe { asm.get_code() };
+    let func: fn(i32) -> i32 = unsafe { asm.as_fn() };
     for i in 0..=10 {
         println!("0 + ... + {} = {}", i, func(i));
     }

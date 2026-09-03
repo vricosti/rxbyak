@@ -37,7 +37,7 @@ fn main() -> Result<()> {
     asm.ret()?;
     asm.ready()?;
 
-    let jit_func: fn(*const A, i32, i32, i32, i32, i32) -> i32 = unsafe { asm.get_code() };
+    let jit_func: fn(*const A, i32, i32, i32, i32, i32) -> i32 = unsafe { asm.as_fn() };
 
     let mut rng_state: u32 = 42;
     let mut next_rand = || -> i32 {
@@ -54,7 +54,7 @@ fn main() -> Result<()> {
         let t5 = next_rand();
         let x = a.func(t1, t2, t3, t4, t5);
         let y = jit_func(&a, t1, t2, t3, t4, t5);
-        print!("{} {}, {}\n", if x == y { 'o' } else { 'x' }, x, y);
+        println!("{} {}, {}", if x == y { 'o' } else { 'x' }, x, y);
     }
 
     Ok(())

@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Rust port of xbyak - x86/x64 JIT assembler"
 license = "BSD-3-Clause"
+documentation = "https://docs.rs/rxbyak"
+repository = "https://github.com/vricosti/rxbyak"
+readme = "README.md"
+keywords = ["assembler", "jit", "x86", "x86-64", "code-generation"]
+categories = ["compilers", "development-tools"]
 
 [dependencies]
 bitflags = "2"

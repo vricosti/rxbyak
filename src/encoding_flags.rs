@@ -95,7 +95,7 @@ impl TypeFlags {
     pub const T_SENTRY: Self = Self((1 << 38) - 1);
     /// Allow different register sizes
     pub const T_ALLOW_DIFF_SIZE: Self = Self(1 << 38);
-    /// Allow [abcd]h registers
+    /// Allow `[abcd]h` registers.
     pub const T_ALLOW_ABCDH: Self = Self(1 << 39);
 
     // Also alias T_EW0 = T_W0
@@ -115,7 +115,7 @@ impl TypeFlags {
 
     /// Get PP value from type flags: T_66→1, T_F3→2, T_F2→3, else→0
     #[inline]
-    pub const fn get_pp(self) -> u8 {
+    pub const fn mandatory_prefix(self) -> u8 {
         if self.0 & Self::T_66.0 != 0 {
             1
         } else if self.0 & Self::T_F3.0 != 0 {
@@ -129,7 +129,7 @@ impl TypeFlags {
 
     /// Get MAP value from type flags.
     #[inline]
-    pub const fn get_map(self) -> u8 {
+    pub const fn opcode_map(self) -> u8 {
         if self.0 & Self::T_MAP6.0 != 0 {
             6
         } else if self.0 & Self::T_MAP5.0 != 0 {
@@ -147,7 +147,7 @@ impl TypeFlags {
 
     /// Get the N value for disp8*N (low 3 bits).
     #[inline]
-    pub const fn get_n(self) -> u8 {
+    pub const fn displacement_scale(self) -> u8 {
         (self.0 & Self::T_NX_MASK.0) as u8
     }
 
@@ -201,19 +201,19 @@ mod tests {
 
     #[test]
     fn test_pp() {
-        assert_eq!(TypeFlags::T_66.get_pp(), 1);
-        assert_eq!(TypeFlags::T_F3.get_pp(), 2);
-        assert_eq!(TypeFlags::T_F2.get_pp(), 3);
-        assert_eq!(TypeFlags::NONE.get_pp(), 0);
+        assert_eq!(TypeFlags::T_66.mandatory_prefix(), 1);
+        assert_eq!(TypeFlags::T_F3.mandatory_prefix(), 2);
+        assert_eq!(TypeFlags::T_F2.mandatory_prefix(), 3);
+        assert_eq!(TypeFlags::NONE.mandatory_prefix(), 0);
     }
 
     #[test]
     fn test_map() {
-        assert_eq!(TypeFlags::T_0F.get_map(), 1);
-        assert_eq!(TypeFlags::T_0F38.get_map(), 2);
-        assert_eq!(TypeFlags::T_0F3A.get_map(), 3);
-        assert_eq!(TypeFlags::T_MAP5.get_map(), 5);
-        assert_eq!(TypeFlags::T_MAP6.get_map(), 6);
+        assert_eq!(TypeFlags::T_0F.opcode_map(), 1);
+        assert_eq!(TypeFlags::T_0F38.opcode_map(), 2);
+        assert_eq!(TypeFlags::T_0F3A.opcode_map(), 3);
+        assert_eq!(TypeFlags::T_MAP5.opcode_map(), 5);
+        assert_eq!(TypeFlags::T_MAP6.opcode_map(), 6);
     }
 
     #[test]

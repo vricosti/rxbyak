@@ -172,7 +172,7 @@ fn test_nm_alu_rr32() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("add", |a, d, s| a.add(d, s)),
         ("sub", |a, d, s| a.sub(d, s)),
         ("and", |a, d, s| a.and_(d, s)),
@@ -212,7 +212,7 @@ fn test_nm_alu_rr64() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("add", |a, d, s| a.add(d, s)),
         ("sub", |a, d, s| a.sub(d, s)),
         ("and", |a, d, s| a.and_(d, s)),
@@ -248,7 +248,7 @@ fn test_nm_alu_rr8() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("add", |a, d, s| a.add(d, s)),
         ("sub", |a, d, s| a.sub(d, s)),
         ("cmp", |a, d, s| a.cmp(d, s)),
@@ -284,7 +284,7 @@ fn test_nm_alu_ri32() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, i32) -> Result<()>)] = &[
+    let ops: &[RegI32Op] = &[
         ("add", |a, d, i| a.add(d, i)),
         ("sub", |a, d, i| a.sub(d, i)),
         ("and", |a, d, i| a.and_(d, i)),
@@ -318,7 +318,7 @@ fn test_nm_alu_ri64() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, i32) -> Result<()>)] = &[
+    let ops: &[RegI32Op] = &[
         ("add", |a, d, i| a.add(d, i)),
         ("sub", |a, d, i| a.sub(d, i)),
         ("and", |a, d, i| a.and_(d, i)),
@@ -354,7 +354,7 @@ fn test_nm_alu_rm() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Address) -> Result<()>)] = &[
+    let ops: &[RegAddressOp] = &[
         ("add", |a, d, m| a.add(d, m)),
         ("sub", |a, d, m| a.sub(d, m)),
         ("and", |a, d, m| a.and_(d, m)),
@@ -385,7 +385,7 @@ fn test_nm_alu_mr() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Address, Reg) -> Result<()>)] = &[
+    let ops: &[AddressRegOp] = &[
         ("add", |a, m, s| a.add(m, s)),
         ("sub", |a, m, s| a.sub(m, s)),
         ("and", |a, m, s| a.and_(m, s)),
@@ -400,7 +400,6 @@ fn test_nm_alu_mr() {
         for (addr, nasm_mem) in mems32() {
             for &(reg, rn) in regs32 {
                 let asm = format!("{} {}, {}", op_name, nasm_mem, rn);
-                let addr = addr.clone();
                 insns.push((
                     asm,
                     Box::new(move |a: &mut CodeAssembler| op_fn(a, addr, reg)),
@@ -417,7 +416,7 @@ fn test_nm_alu_mi() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Address, i32) -> Result<()>)] = &[
+    let ops: &[AddressI32Op] = &[
         ("add", |a, m, i| a.add(m, i)),
         ("sub", |a, m, i| a.sub(m, i)),
         ("and", |a, m, i| a.and_(m, i)),
@@ -432,7 +431,6 @@ fn test_nm_alu_mi() {
         for (addr, nasm_mem) in mems32() {
             for &imm in imms {
                 let asm = format!("{} {}, 0x{:x}", op_name, nasm_mem, imm as u32);
-                let addr = addr.clone();
                 insns.push((
                     asm,
                     Box::new(move |a: &mut CodeAssembler| op_fn(a, addr, imm)),
@@ -527,7 +525,6 @@ fn test_nm_mov_rm_mr() {
     for (addr, nasm_mem) in mems32() {
         for &(reg, rn) in regs32 {
             let asm = format!("mov {}, {}", nasm_mem, rn);
-            let addr = addr.clone();
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.mov(addr, reg))));
         }
     }
@@ -542,7 +539,6 @@ fn test_nm_mov_rm_mr() {
     for (addr, nasm_mem) in mems64() {
         for &(reg, rn) in regs64 {
             let asm = format!("mov {}, {}", nasm_mem, rn);
-            let addr = addr.clone();
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.mov(addr, reg))));
         }
     }
@@ -550,7 +546,6 @@ fn test_nm_mov_rm_mr() {
     for (addr, nasm_mem) in mems32() {
         for imm in [0i32, 1, 0x42, 0x12345678] {
             let asm = format!("mov {}, 0x{:x}", nasm_mem, imm as u32);
-            let addr = addr.clone();
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.mov(addr, imm))));
         }
     }
@@ -567,7 +562,7 @@ fn test_nm_shift() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, u8) -> Result<()>)] = &[
+    let ops: &[RegU8Op] = &[
         ("shl", |a, r, i| a.shl(r, i)),
         ("shr", |a, r, i| a.shr(r, i)),
         ("sar", |a, r, i| a.sar(r, i)),
@@ -603,7 +598,7 @@ fn test_nm_shift() {
     }
 
     // Shift mem
-    let shift_mem_ops: &[(&str, fn(&mut CodeAssembler, Address, u8) -> Result<()>)] = &[
+    let shift_mem_ops: &[AddressU8Op] = &[
         ("shl", |a, m, i| a.shl(m, i)),
         ("shr", |a, m, i| a.shr(m, i)),
         ("sar", |a, m, i| a.sar(m, i)),
@@ -621,7 +616,7 @@ fn test_nm_shift() {
     }
 
     // Shift/rotate by CL register
-    let cl_ops: &[(&str, fn(&mut CodeAssembler, Reg) -> Result<()>)] = &[
+    let cl_ops: &[RegUnaryOp] = &[
         ("shl", |a, r| a.shl_cl(r)),
         ("shr", |a, r| a.shr_cl(r)),
         ("sar", |a, r| a.sar_cl(r)),
@@ -643,7 +638,7 @@ fn test_nm_shift() {
     }
 
     // Shift/rotate mem by CL
-    let cl_mem_ops: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>)] = &[
+    let cl_mem_ops: &[AddressUnaryOp] = &[
         ("shl", |a, m| a.shl_cl(m)),
         ("shr", |a, m| a.shr_cl(m)),
         ("sar", |a, m| a.sar_cl(m)),
@@ -806,7 +801,7 @@ fn test_nm_lea() {
     for &(reg, rn) in regs {
         for (addr, nasm_mem) in addrs {
             let asm = format!("lea {}, {}", rn, nasm_mem);
-            let addr = addr.clone();
+            let addr = *addr;
             insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.lea(reg, addr))));
         }
     }
@@ -896,7 +891,7 @@ fn test_nm_cmov() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let cmovs: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let cmovs: &[RegBinaryOp] = &[
         ("cmovo", |a, d, s| a.cmovo(d, s)),
         ("cmovno", |a, d, s| a.cmovno(d, s)),
         ("cmovb", |a, d, s| a.cmovb(d, s)),
@@ -972,7 +967,7 @@ fn test_nm_setcc() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let sets: &[(&str, fn(&mut CodeAssembler, Reg) -> Result<()>)] = &[
+    let sets: &[RegUnaryOp] = &[
         ("seto", |a, r| a.seto(r)),
         ("setno", |a, r| a.setno(r)),
         ("setb", |a, r| a.setb(r)),
@@ -999,7 +994,7 @@ fn test_nm_setcc() {
         }
     }
     // set* mem8 (subset)
-    let sets_mem: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>)] = &[
+    let sets_mem: &[AddressUnaryOp] = &[
         ("seto", |a, m| a.seto(m)),
         ("setb", |a, m| a.setb(m)),
         ("sete", |a, m| a.sete(m)),
@@ -1024,7 +1019,7 @@ fn test_nm_bt() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("bt", |a, d, s| a.bt(d, s)),
         ("bts", |a, d, s| a.bts(d, s)),
         ("btr", |a, d, s| a.btr(d, s)),
@@ -1056,8 +1051,7 @@ fn test_nm_bt() {
     }
 
     // bt mem, reg
-    let ops_mem: &[(&str, fn(&mut CodeAssembler, Address, Reg) -> Result<()>)] =
-        &[("bt", |a, m, s| a.bt(m, s)), ("bts", |a, m, s| a.bts(m, s))];
+    let ops_mem: &[AddressRegOp] = &[("bt", |a, m, s| a.bt(m, s)), ("bts", |a, m, s| a.bts(m, s))];
     for &(name, op_fn) in ops_mem {
         for (addr, nasm_mem) in mems32() {
             let asm = format!("{} {}, ecx", name, nasm_mem);
@@ -1069,7 +1063,7 @@ fn test_nm_bt() {
     }
 
     // bt/bts/btr/btc reg, imm8
-    let imm_ops: &[(&str, fn(&mut CodeAssembler, Reg, u8) -> Result<()>)] = &[
+    let imm_ops: &[RegU8Op] = &[
         ("bt", |a, r, i| a.bt_imm(r, i)),
         ("bts", |a, r, i| a.bts_imm(r, i)),
         ("btr", |a, r, i| a.btr_imm(r, i)),
@@ -1098,7 +1092,7 @@ fn test_nm_bt() {
     }
 
     // bt/bts/btr/btc mem, imm8
-    let imm_mem_ops: &[(&str, fn(&mut CodeAssembler, Address, u8) -> Result<()>)] = &[
+    let imm_mem_ops: &[AddressU8Op] = &[
         ("bt", |a, m, i| a.bt_imm(m, i)),
         ("bts", |a, m, i| a.bts_imm(m, i)),
         ("btr", |a, m, i| a.btr_imm(m, i)),
@@ -1126,7 +1120,7 @@ fn test_nm_bsf_bsr() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Reg, Reg) -> Result<()>)] = &[
+    let ops: &[RegBinaryOp] = &[
         ("bsf", |a, d, s| a.bsf(d, s)),
         ("bsr", |a, d, s| a.bsr(d, s)),
         ("popcnt", |a, d, s| a.popcnt(d, s)),
@@ -1154,7 +1148,7 @@ fn test_nm_bsf_bsr() {
         }
     }
     // reg, mem
-    let ops_mem: &[(&str, fn(&mut CodeAssembler, Reg, Address) -> Result<()>)] = &[
+    let ops_mem: &[RegAddressOp] = &[
         ("bsf", |a, d, m| a.bsf(d, m)),
         ("bsr", |a, d, m| a.bsr(d, m)),
         ("popcnt", |a, d, m| a.popcnt(d, m)),
@@ -1239,7 +1233,7 @@ fn test_nm_mul_div() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops_reg: &[(&str, fn(&mut CodeAssembler, Reg) -> Result<()>)] = &[
+    let ops_reg: &[RegUnaryOp] = &[
         ("mul", |a, r| a.mul(r)),
         ("div", |a, r| a.div(r)),
         ("idiv", |a, r| a.idiv(r)),
@@ -1261,7 +1255,7 @@ fn test_nm_mul_div() {
         }
     }
     // mul/div/neg/not mem
-    let ops_mem: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>)] = &[
+    let ops_mem: &[AddressUnaryOp] = &[
         ("mul", |a, m| a.mul(m)),
         ("div", |a, m| a.div(m)),
         ("neg", |a, m| a.neg(m)),
@@ -1490,7 +1484,7 @@ fn test_nm_nontemporal() {
     // movnti [mem], reg32/64
     for (addr, nasm_mem) in mems_nosizeptr() {
         let asm = format!("movnti {}, eax", nasm_mem);
-        let addr2 = addr.clone();
+        let addr2 = addr;
         insns.push((
             asm,
             Box::new(move |a: &mut CodeAssembler| a.movnti(addr2, EAX)),
@@ -1510,7 +1504,7 @@ fn test_nm_prefetch() {
     let nasm = skip_if_no_nasm!();
     let mut insns: Vec<NmPair> = Vec::new();
 
-    let ops: &[(&str, fn(&mut CodeAssembler, Address) -> Result<()>)] = &[
+    let ops: &[AddressUnaryOp] = &[
         ("prefetchnta", |a, m| a.prefetchnta(m)),
         ("prefetcht0", |a, m| a.prefetcht0(m)),
         ("prefetcht1", |a, m| a.prefetcht1(m)),
@@ -1644,7 +1638,7 @@ fn test_nm_mxcsr() {
 
     for (addr, nasm_mem) in mems_nosizeptr() {
         let asm = format!("stmxcsr {}", nasm_mem);
-        let addr2 = addr.clone();
+        let addr2 = addr;
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.stmxcsr(addr2))));
         let asm = format!("ldmxcsr {}", nasm_mem);
         insns.push((asm, Box::new(move |a: &mut CodeAssembler| a.ldmxcsr(addr))));

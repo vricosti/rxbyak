@@ -59,7 +59,7 @@ fn main() -> Result<()> {
     asm.ret()?;
     asm.ready()?;
 
-    let f: extern "C" fn() -> i32 = unsafe { asm.get_code() };
+    let f: extern "C" fn() -> i32 = unsafe { asm.as_fn() };
     assert_eq!(f(), 42);
     Ok(())
 }
@@ -169,11 +169,11 @@ let mut asm = CodeAssembler::new_auto_grow(4096)?;  // starts at 4KB, grows as n
 asm.ready()?;  // resolves labels and sets RX protection
 ```
 
-After `ready()`, the memory is set to read+execute (RX). Use `get_code()` to obtain a typed function pointer:
+After `ready()`, the memory is set to read+execute (RX). Use `as_fn()` to obtain a typed function pointer:
 
 ```rust
 asm.ready()?;
-let f: extern "C" fn(i64, i64) -> i64 = unsafe { asm.get_code() };
+let f: extern "C" fn(i64, i64) -> i64 = unsafe { asm.as_fn() };
 let result = f(10, 20);
 ```
 

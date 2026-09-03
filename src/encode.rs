@@ -69,10 +69,10 @@ impl CodeBuffer {
         r2: &Reg,
         type_: TypeFlags,
     ) -> Result<bool> {
-        if r1.get_nf() || r2.get_nf() {
+        if r1.no_flags() || r2.no_flags() {
             return Err(Error::InvalidNf);
         }
-        if r1.get_zu() || r2.get_zu() {
+        if r1.zero_upper() || r2.zero_upper() {
             return Err(Error::InvalidZu);
         }
 
@@ -126,15 +126,15 @@ impl CodeBuffer {
         addr: &Address,
         type_: TypeFlags,
     ) -> Result<bool> {
-        if r.get_nf() {
+        if r.no_flags() {
             return Err(Error::InvalidNf);
         }
-        if r.get_zu() {
+        if r.zero_upper() {
             return Err(Error::InvalidZu);
         }
 
-        let p66 = (r.is_bit(16) && !(addr.get_bit() == 32 || addr.get_bit() == 64))
-            || (addr.get_bit() == 16 && !(r.is_bit(32) || r.is_bit(64)));
+        let p66 = (r.is_bit(16) && !(addr.bit_width() == 32 || addr.bit_width() == 64))
+            || (addr.bit_width() == 16 && !(r.is_bit(32) || r.is_bit(64)));
         if type_.contains(TypeFlags::T_66) || p66 {
             self.db(0x66)?;
         }
@@ -146,9 +146,9 @@ impl CodeBuffer {
         }
 
         let is0f = type_.intersects(TypeFlags::T_0F);
-        let exp = addr.get_reg_exp();
-        let base = exp.get_base();
-        let idx = exp.get_index();
+        let exp = addr.register_expression();
+        let base = exp.base();
+        let idx = exp.index();
 
         // 32-bit address in 64-bit mode
         if addr.is_32bit() {
@@ -212,8 +212,8 @@ impl CodeBuffer {
     /// Emit SIB addressing (ModRM + optional SIB + displacement).
     #[inline]
     pub(crate) fn emit_sib(&mut self, addr: &Address, reg: u8) -> Result<()> {
-        let exp = addr.get_reg_exp();
-        let disp64 = exp.get_disp();
+        let exp = addr.register_expression();
+        let disp64 = exp.displacement();
 
         // Verify displacement fits
         let high = (disp64 as u64) >> 31;
@@ -222,34 +222,33 @@ impl CodeBuffer {
         }
 
         let disp = disp64 as u32;
-        let base = exp.get_base();
-        let index = exp.get_index();
-        let base_idx = base.get_idx();
-        let base_bit = base.get_bit();
-        let index_bit = index.get_bit();
+        let base = exp.base();
+        let index = exp.index();
+        let base_idx = base.index();
+        let base_bit = base.bit_width();
+        let index_bit = index.bit_width();
         let disp8n = addr.disp8n;
 
         // Determine mod field
-        let mod_ = if base_bit == 0
-            || ((base_idx & 7) != 5 && disp == 0 && addr.get_label_id().is_none())
-        {
-            0u8 // mod00
-        } else if addr.get_label_id().is_some() {
-            2u8 // mod10 (always disp32 for labels)
-        } else if disp8n == 0 {
-            if is_in_disp8(disp) {
-                1
+        let mod_ =
+            if base_bit == 0 || ((base_idx & 7) != 5 && disp == 0 && addr.label_id().is_none()) {
+                0u8 // mod00
+            } else if addr.label_id().is_some() {
+                2u8 // mod10 (always disp32 for labels)
+            } else if disp8n == 0 {
+                if is_in_disp8(disp) {
+                    1
+                } else {
+                    2
+                } // mod01 or mod10
             } else {
-                2
-            } // mod01 or mod10
-        } else {
-            let t = (disp as i32 / disp8n as i32) as u32;
-            if (disp as i32 % disp8n as i32) == 0 && is_in_disp8(t) {
-                1 // mod01 with scaled disp
-            } else {
-                2 // mod10
-            }
-        };
+                let t = (disp as i32 / disp8n as i32) as u32;
+                if (disp as i32 % disp8n as i32) == 0 && is_in_disp8(t) {
+                    1 // mod01 with scaled disp
+                } else {
+                    2 // mod10
+                }
+            };
 
         let new_base_idx = if base_bit > 0 { base_idx & 7 } else { 5 }; // EBP=5 for disp32-only
 
@@ -260,12 +259,8 @@ impl CodeBuffer {
         if has_sib {
             self.set_modrm(mod_, reg, 4)?; // ESP=4 signals SIB follows
                                            // SIB: [SS:index:base]
-            let idx = if index_bit > 0 {
-                index.get_idx() & 7
-            } else {
-                4
-            }; // ESP=4 = no index
-            let scale = exp.get_scale();
+            let idx = if index_bit > 0 { index.index() & 7 } else { 4 }; // ESP=4 = no index
+            let scale = exp.scale();
             let ss = match scale {
                 8 => 3,
                 4 => 2,
@@ -300,16 +295,16 @@ impl CodeBuffer {
         if !addr.permit_vsib && addr.is_vsib() {
             return Err(Error::BadVsibAddressing);
         }
-        match addr.get_mode() {
+        match addr.mode() {
             AddressMode::ModRM => self.emit_sib(addr, reg),
             AddressMode::Rip | AddressMode::RipAddr => {
                 self.set_modrm(0, reg, 5)?;
-                if addr.get_label_id().is_some() {
+                if addr.label_id().is_some() {
                     // Label-relative RIP: will be patched later
                     self.dd(0)?; // placeholder
                 } else {
-                    let mut disp = addr.get_disp();
-                    if addr.get_mode() == AddressMode::RipAddr {
+                    let mut disp = addr.displacement();
+                    if addr.mode() == AddressMode::RipAddr {
                         // Adjust for current position + 4 bytes displacement + immSize
                         let cur = self.cur() as usize;
                         disp -= (cur + 4 + addr.imm_size as usize) as i64;
@@ -341,14 +336,14 @@ impl CodeBuffer {
         let is256 = type_.contains(TypeFlags::T_L1) || reg.is_ymm() || base.is_ymm();
         let r = reg.is_ext_idx();
         let b = base.is_ext_idx();
-        let idx = v.map_or(0, |v| v.get_idx());
+        let idx = v.map_or(0, |v| v.index());
 
         // VEX doesn't support registers >= 16
-        if (idx | reg.get_idx() | base.get_idx()) >= 16 {
+        if (idx | reg.index() | base.index()) >= 16 {
             return Err(Error::BadCombination);
         }
 
-        let pp = type_.get_pp();
+        let pp = type_.mandatory_prefix();
         let vvvv = (((!idx) & 15) << 3) | (if is256 { 4 } else { 0 }) | pp;
 
         if !b && !x && w == 0 && type_.intersects(TypeFlags::T_0F) {
@@ -357,7 +352,7 @@ impl CodeBuffer {
             self.db((if r { 0 } else { 0x80 }) | vvvv)?;
         } else {
             // 3-byte VEX
-            let mmmm = type_.get_map();
+            let mmmm = type_.opcode_map();
             self.db(0xC4)?;
             self.db((if r { 0 } else { 0x80 })
                 | (if x { 0 } else { 0x40 })
@@ -394,9 +389,9 @@ impl CodeBuffer {
         } else {
             0
         };
-        let mmm = type_.get_map();
-        let pp = type_.get_pp();
-        let idx = v.map_or(0, |v| v.get_idx());
+        let mmm = type_.opcode_map();
+        let pp = type_.mandatory_prefix();
+        let idx = v.map_or(0, |v| v.index());
         let vvvv = !idx;
 
         let r_flag = reg.is_ext_idx();
@@ -415,9 +410,9 @@ impl CodeBuffer {
         let rp = reg.is_ext_idx2();
 
         // Rounding
-        let r_round = reg.get_rounding() as u8;
-        let b_round = base.get_rounding() as u8;
-        let v_round = v.map_or(0, |v| v.get_rounding() as u8);
+        let r_round = reg.rounding_mode() as u8;
+        let b_round = base.rounding_mode() as u8;
+        let v_round = v.map_or(0, |v| v.rounding_mode() as u8);
         // Verify at most one rounding source
         let rounding = {
             let vals = [r_round, b_round, v_round];
@@ -447,9 +442,9 @@ impl CodeBuffer {
         } else {
             let mut vl = vl_hint;
             if let Some(v_reg) = v {
-                vl = vl.max(v_reg.get_bit() as u32);
+                vl = vl.max(v_reg.bit_width() as u32);
             }
-            vl = vl.max(reg.get_bit() as u32).max(base.get_bit() as u32);
+            vl = vl.max(reg.bit_width() as u32).max(base.bit_width() as u32);
             ll = if vl >= 512 {
                 2
             } else if vl == 256 {
@@ -468,7 +463,7 @@ impl CodeBuffer {
                 } else {
                     8
                 };
-            } else if type_.get_n() == TypeFlags::T_DUP.0 as u8 {
+            } else if type_.displacement_scale() == TypeFlags::T_DUP.0 as u8 {
                 disp8n = match vl {
                     128 => 8,
                     256 => 32,
@@ -500,9 +495,9 @@ impl CodeBuffer {
             aaa
         } else {
             let vals = [
-                base.get_opmask_idx(),
-                reg.get_opmask_idx(),
-                v.map_or(0, |v| v.get_opmask_idx()),
+                base.opmask_index(),
+                reg.opmask_index(),
+                v.map_or(0, |v| v.opmask_index()),
             ];
             let non_zero: Vec<u8> = vals.iter().copied().filter(|&x| x > 0).collect();
             if non_zero.len() > 1 && !non_zero.iter().all(|&x| x == non_zero[0]) {
@@ -544,7 +539,7 @@ impl CodeBuffer {
         type_: TypeFlags,
         sc: Option<u8>,
     ) -> Result<()> {
-        let map = match type_.get_map() {
+        let map = match type_.opcode_map() {
             0 => 4,
             map => map,
         };
@@ -560,10 +555,10 @@ impl CodeBuffer {
         } else {
             0
         };
-        let vvvv = ((!v.get_idx()) & 15) << 3;
+        let vvvv = ((!v.index()) & 15) << 3;
         let x4 = if x.is_ext_idx2() { 0 } else { 0x04 };
         let pp = if type_.intersects(TypeFlags::T_F2 | TypeFlags::T_F3 | TypeFlags::T_66) {
-            type_.get_pp()
+            type_.mandatory_prefix()
         } else if r.is_bit(16) || v.is_bit(16) {
             1
         } else {
@@ -571,7 +566,7 @@ impl CodeBuffer {
         };
         let v4 = if v.is_ext_idx2() { 0 } else { 1 };
         let nd = if type_.contains(TypeFlags::T_ZU) {
-            u8::from(r.get_zu() || b.get_zu())
+            u8::from(r.zero_upper() || b.zero_upper())
         } else if type_.contains(TypeFlags::T_ND1) {
             1
         } else if type_.contains(TypeFlags::T_APX) {
@@ -579,11 +574,11 @@ impl CodeBuffer {
         } else {
             u8::from(v.is_reg())
         };
-        let nf = u8::from(r.get_nf() || b.get_nf() || x.get_nf() || v.get_nf());
+        let nf = u8::from(r.no_flags() || b.no_flags() || x.no_flags() || v.no_flags());
         if !type_.contains(TypeFlags::T_NF) && nf != 0 {
             return Err(Error::InvalidNf);
         }
-        if !type_.contains(TypeFlags::T_ZU) && r.get_zu() {
+        if !type_.contains(TypeFlags::T_ZU) && r.zero_upper() {
             return Err(Error::InvalidZu);
         }
 
@@ -631,16 +626,16 @@ impl CodeBuffer {
 
         match p2 {
             RegMem::Mem(mut addr) => {
-                let exp = addr.get_reg_exp();
-                self.emit_evex_legacy(&r, exp.get_base(), exp.get_index(), d, type_, sc)?;
+                let exp = addr.register_expression();
+                self.emit_evex_legacy(&r, exp.base(), exp.index(), d, type_, sc)?;
                 self.write_code(type_, d, code, false)?;
                 addr.imm_size = imm_size;
-                self.emit_addr(&addr, r.get_idx())?;
+                self.emit_addr(&addr, r.index())?;
             }
             RegMem::Reg(op2) => {
                 self.emit_evex_legacy(&op2, &r, &Reg::default(), d, type_, sc)?;
                 self.write_code(type_, d, code, false)?;
-                self.set_modrm(3, op2.get_idx(), r.get_idx())?;
+                self.set_modrm(3, op2.index(), r.index())?;
             }
         }
         Ok(true)
@@ -660,8 +655,8 @@ impl CodeBuffer {
         code: u8,
         imm8: Option<u8>,
     ) -> Result<()> {
-        let bit = d.get_bit();
-        if r1.get_bit() != bit || (op2.is_reg() && op2.get_bit() != bit) {
+        let bit = d.bit_width();
+        if r1.bit_width() != bit || (op2.is_reg() && op2.bit_width() != bit) {
             return Err(Error::BadCombination);
         }
         type_ |= if bit == 64 {
@@ -670,7 +665,7 @@ impl CodeBuffer {
             TypeFlags::T_W0
         };
 
-        if d.has_rex2() || r1.has_rex2() || op2.has_rex2() || d.get_nf() {
+        if d.has_rex2() || r1.has_rex2() || op2.has_rex2() || d.no_flags() {
             self.op_roo(
                 r1,
                 op2,
@@ -695,13 +690,13 @@ impl CodeBuffer {
         if !type_.contains(TypeFlags::T_ALLOW_DIFF_SIZE)
             && r1.is_reg()
             && r2.is_reg()
-            && r1.get_bit() != r2.get_bit()
+            && r1.bit_width() != r2.bit_width()
         {
             return Err(Error::BadSizeOfRegister);
         }
         let rex2 = self.emit_rex_for_reg_reg(r2, r1, type_)?;
         self.write_code(type_, r1, code, rex2)?;
-        self.set_modrm(3, r1.get_idx(), r2.get_idx())
+        self.set_modrm(3, r1.index(), r2.index())
     }
 
     /// Encode mem-reg instruction: REX + opcode + ModR/M+SIB+disp.
@@ -718,7 +713,7 @@ impl CodeBuffer {
         }
         let rex2 = self.emit_rex_for_reg_mem(r, addr, type_)?;
         self.write_code(type_, r, code, rex2)?;
-        self.emit_addr(addr, r.get_idx())
+        self.emit_addr(addr, r.index())
     }
 
     /// Xbyak `opMR` with its optional APX/EVEX-legacy alternate encoding.
@@ -772,7 +767,7 @@ impl CodeBuffer {
             self.db(0x0F)?;
         }
         self.db(code)?;
-        self.emit_addr(addr, reg.get_idx())
+        self.emit_addr(addr, reg.index())
     }
 
     /// Encode reg + (reg or mem) instruction with extension field.
@@ -790,8 +785,8 @@ impl CodeBuffer {
                 let r = Reg::new(
                     ext,
                     crate::operand::Kind::Reg,
-                    if addr.get_bit() > 0 {
-                        addr.get_bit()
+                    if addr.bit_width() > 0 {
+                        addr.bit_width()
                     } else {
                         32
                     },
@@ -801,7 +796,7 @@ impl CodeBuffer {
                 self.op_mr(&addr_with_imm, &r, type_, code)
             }
             RegMem::Reg(reg) => {
-                let r = Reg::new(ext, crate::operand::Kind::Reg, reg.get_bit());
+                let r = Reg::new(ext, crate::operand::Kind::Reg, reg.bit_width());
                 self.op_rr(&r, reg, type_ | TypeFlags::T_ALLOW_ABCDH, code)
             }
         }
@@ -818,18 +813,18 @@ impl CodeBuffer {
     ) -> Result<()> {
         match rm {
             RegMem::Mem(addr) => {
-                let op_bit = if addr.get_bit() == 64 {
+                let op_bit = if addr.bit_width() == 64 {
                     32
                 } else {
-                    addr.get_bit()
+                    addr.bit_width()
                 };
                 let r = Reg::new(ext, crate::operand::Kind::Reg, op_bit);
                 self.op_mr(addr, &r, type_, code)
             }
             RegMem::Reg(reg) if reg.is_reg() && (reg.is_bit(32) || reg.is_bit(64)) => {
-                let op_bit = if reg.is_bit(64) { 32 } else { reg.get_bit() };
+                let op_bit = if reg.is_bit(64) { 32 } else { reg.bit_width() };
                 let r = Reg::new(ext, crate::operand::Kind::Reg, op_bit);
-                let operand = Reg::new(reg.get_idx(), crate::operand::Kind::Reg, op_bit);
+                let operand = Reg::new(reg.index(), crate::operand::Kind::Reg, op_bit);
                 self.op_rr(&r, &operand, type_ | TypeFlags::T_ALLOW_ABCDH, code)
             }
             RegMem::Reg(_) => Err(Error::BadCombination),
@@ -845,7 +840,7 @@ impl CodeBuffer {
         type_: TypeFlags,
         code: u8,
     ) -> Result<()> {
-        if addr.get_mode() != AddressMode::ModRM {
+        if addr.mode() != AddressMode::ModRM {
             return Err(Error::InvalidMibAddress);
         }
         self.op_mr(&addr.clone_no_optimize(), reg, type_, code)
@@ -888,8 +883,8 @@ impl CodeBuffer {
         code: u8,
         imm8: Option<u8>,
     ) -> Result<()> {
-        if (r.is_xmm() && r.get_idx() >= 16)
-            || matches!(op, RegMem::Reg(reg) if reg.is_xmm() && reg.get_idx() >= 16)
+        if (r.is_xmm() && r.index() >= 16)
+            || matches!(op, RegMem::Reg(reg) if reg.is_xmm() && reg.index() >= 16)
         {
             return Err(Error::NotSupported);
         }
@@ -913,7 +908,7 @@ impl CodeBuffer {
         code2: u8,
         imm8: Option<u8>,
     ) -> Result<()> {
-        if x.get_idx() <= 15
+        if x.index() <= 15
             && op.has_rex2()
             && self.op_roo(
                 &Reg::default(),
@@ -939,12 +934,12 @@ impl CodeBuffer {
     /// Encode Xbyak's Key Locker ENCODEKEY legacy/APX forms.
     #[inline]
     pub(crate) fn op_encode_key(&mut self, r1: &Reg, r2: &Reg, code1: u8, code2: u8) -> Result<()> {
-        if r1.get_idx() < 8 && r2.get_idx() < 8 {
+        if r1.index() < 8 && r2.index() < 8 {
             self.db(0xF3)?;
             self.db(0x0F)?;
             self.db(0x38)?;
             self.db(code1)?;
-            return self.set_modrm(3, r1.get_idx(), r2.get_idx());
+            return self.set_modrm(3, r1.index(), r2.index());
         }
         self.op_roo(
             &Reg::default(),
@@ -986,9 +981,9 @@ impl CodeBuffer {
                     return Err(Error::InvalidZero);
                 }
                 let mut addr = *addr;
-                let exp = addr.get_reg_exp();
-                let base = *exp.get_base();
-                let index = *exp.get_index();
+                let exp = addr.register_expression();
+                let base = *exp.base();
+                let index = *exp.index();
 
                 // 32-bit address override in 64-bit mode
                 if addr.is_32bit() {
@@ -999,11 +994,11 @@ impl CodeBuffer {
                     || r.has_evex()
                     || p1.is_some_and(|p| p.has_evex())
                     || addr.is_broadcast()
-                    || addr.get_opmask_idx() != 0
+                    || addr.opmask_index() != 0
                     || addr.has_rex2();
 
                 if need_evex {
-                    let aaa = addr.get_opmask_idx();
+                    let aaa = addr.opmask_index();
                     if aaa != 0 && !type_.contains(TypeFlags::T_M_K) {
                         return Err(Error::InvalidOpmaskWithMemory);
                     }
@@ -1012,7 +1007,7 @@ impl CodeBuffer {
                         return Err(Error::InvalidBroadcast);
                     }
                     let vl = if exp.is_vsib() {
-                        index.get_bit() as u32
+                        index.bit_width() as u32
                     } else {
                         0
                     };
@@ -1042,7 +1037,7 @@ impl CodeBuffer {
                 if imm8.is_some() {
                     addr.imm_size = 1;
                 }
-                self.emit_addr(&addr, r.get_idx())?;
+                self.emit_addr(&addr, r.index())?;
             }
             RegMem::Reg(base) => {
                 let need_evex = type_.contains(TypeFlags::T_MUST_EVEX)
@@ -1055,7 +1050,7 @@ impl CodeBuffer {
                 } else {
                     self.emit_vex(r, base, p1, type_, code, false)?;
                 }
-                self.set_modrm(3, r.get_idx(), base.get_idx())?;
+                self.set_modrm(3, r.index(), base.index())?;
             }
         }
         if let Some(imm) = imm8 {

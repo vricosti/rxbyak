@@ -40,7 +40,7 @@ pub(crate) struct AddrInfo {
 }
 
 impl AddrInfo {
-    pub fn get_val(&self, top: *const u8) -> Result<u64> {
+    pub fn value(&self, top: *const u8) -> Result<u64> {
         let disp = match self.mode {
             LabelMode::AddTop => self.jmp_addr.wrapping_add(top as u64),
             LabelMode::AsIs => self.jmp_addr,
@@ -266,7 +266,7 @@ impl CodeBuffer {
             return Ok(());
         }
         for info in &self.addr_info_list {
-            let val = info.get_val(self.ptr)?;
+            let val = info.value(self.ptr)?;
             let bytes = val.to_le_bytes();
             let n = info.jmp_size as usize;
             for (i, byte) in bytes.iter().enumerate().take(n) {
