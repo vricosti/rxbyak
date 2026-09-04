@@ -124,7 +124,11 @@ fn main() -> Result<()> {
     let f: BfFunc = unsafe { asm.as_fn() };
 
     let mut stack = vec![0u8; 128 * 1024];
-    f(bf_putchar as usize, bf_getchar as usize, stack.as_mut_ptr());
+    f(
+        bf_putchar as *const () as usize,
+        bf_getchar as *const () as usize,
+        stack.as_mut_ptr(),
+    );
     println!();
 
     Ok(())
