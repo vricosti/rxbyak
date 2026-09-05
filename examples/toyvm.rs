@@ -227,7 +227,7 @@ impl ToyVm {
                     asm.mov(EDI, (b'A' + r as u8) as i64)?;
                     // Zero-extend 32-bit vm_reg to 64-bit RSI
                     asm.mov(ESI, vm_reg[r])?;
-                    asm.mov(RAX, print_val as usize as i64)?;
+                    asm.mov(RAX, print_val as *const () as usize as i64)?;
                     asm.call_reg(RAX)?;
 
                     asm.pop(R11)?;
